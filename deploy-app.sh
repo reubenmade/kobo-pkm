@@ -18,6 +18,7 @@ DEST="$KOBO/.adds/listenlater"
 mkdir -p "$DEST"
 cp build/listenlater "$DEST/listenlater"
 cp run.sh "$DEST/run.sh"
+cp restart-nickel.sh "$DEST/restart-nickel.sh"
 cp "$HERE/vendor/fbink" "$DEST/fbink" 2>/dev/null || true
 cp "$HERE/vendor/fbdepth" "$DEST/fbdepth" 2>/dev/null || true
 chmod +x "$DEST/listenlater" "$DEST/run.sh" "$DEST/fbink" "$DEST/fbdepth" 2>/dev/null || true

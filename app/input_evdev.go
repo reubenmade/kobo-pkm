@@ -180,17 +180,11 @@ func OpenKeys() (*KeyReader, error) {
 		syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgname(256), uintptr(unsafe.Pointer(&name[0])))
 		n := strings.ToLower(strings.TrimRight(string(name), "\x00"))
 		if strings.Contains(n, "gpio-keys") || strings.Contains(n, "gpio_keys") {
-			// Diagnostic: test whether something else (Nickel?) holds an
-			// exclusive grab — EBUSY (16) here would explain the silent
-			// buttons. Read WITHOUT keeping a grab so delivery is observable
-			// in either case.
+			// With Nickel dead this grab succeeds (Nickel holds it
+			// exclusively while alive — that cost us a day to learn).
 			grab := 1
 			_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgrab, uintptr(unsafe.Pointer(&grab)))
-			log.Printf("keys: using %s (%q), grab test errno=%d (0=ok, 16=EBUSY held elsewhere)", path, n, errno)
-			if errno == 0 {
-				grab = 0
-				syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgrab, uintptr(unsafe.Pointer(&grab)))
-			}
+			log.Printf("keys: using %s (%q), grab errno=%d", path, n, errno)
 			return &KeyReader{f: f}, nil
 		}
 		f.Close()
@@ -261,7 +255,7 @@ func SpyDevice(nameFragment string, out chan<- int) {
 					if typ == evKey && logged < 60 {
 						logged++
 						log.Printf("spy %s: key code=%d val=%d", dev, code, val)
-						if val == 1 && code != 116 { // forward everything but KEY_POWER
+						if val == 1 {
 							out <- int(code)
 						}
 					}

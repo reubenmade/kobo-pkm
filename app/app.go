@@ -156,6 +156,13 @@ func (a *App) RunNoInitialRender() {
 			}
 			a.Dispatch(t)
 		case code := <-a.Keys:
+			// Nickel is dead while we run: the power button and sleep-cover
+			// sensor are ours to honour. Both exit -> run.sh revives Nickel.
+			if code == 116 || code == 35 || code == 59 {
+				log.Printf("app: power/cover key %d -> quit", code)
+				a.Quit = true
+				continue
+			}
 			if a.modal == nil {
 				if h, ok := a.top().(KeyScreen); ok {
 					h.Key(a, code)

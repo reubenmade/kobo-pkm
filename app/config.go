@@ -17,6 +17,7 @@ type Config struct {
 	SwapSet  bool // swap explicitly configured (otherwise auto-detected)
 	MirX     bool
 	MirY     bool
+	SwapBtn  bool // flip physical page-button direction
 	TouchDev string
 }
 
@@ -53,6 +54,8 @@ func LoadConfig(path string) Config {
 			cfg.MirX = v == "1" || v == "true"
 		case "miry":
 			cfg.MirY = v == "1" || v == "true"
+		case "swapbtn":
+			cfg.SwapBtn = v == "1" || v == "true"
 		case "touchdev":
 			cfg.TouchDev = v
 		}

@@ -192,21 +192,24 @@ func (s *Article) Render(a *App) {
 	}
 }
 
-// Key handles the physical page-turn buttons. On the Libra family the
-// buttons report KEY_PAGEUP (104) and KEY_PAGEDOWN (109); anything else is
-// logged by the reader so we can extend the mapping.
+// BtnSwap flips the physical page-button direction (config: swapbtn).
+var BtnSwap bool
+
+// Key handles the physical page-turn buttons: F23=193 back, F24=194 forward
+// on the Libra family (KEY_PAGEUP/PAGEDOWN kept for other models).
 func (s *Article) Key(a *App, code int) {
-	switch code {
-	case 104: // KEY_PAGEUP — front/top button
-		if s.cur > 0 {
-			s.cur--
-			a.Render(RefreshFull)
-		}
-	case 109: // KEY_PAGEDOWN — back/bottom button
-		if s.cur < len(s.pages)-1 {
-			s.cur++
-			a.Render(RefreshFull)
-		}
+	prev := code == 193 || code == 104
+	next := code == 194 || code == 109
+	if BtnSwap {
+		prev, next = next, prev
+	}
+	switch {
+	case prev && s.cur > 0:
+		s.cur--
+		a.Render(RefreshFull)
+	case next && s.cur < len(s.pages)-1:
+		s.cur++
+		a.Render(RefreshFull)
 	}
 }
 

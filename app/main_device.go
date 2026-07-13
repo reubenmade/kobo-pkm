@@ -30,6 +30,7 @@ func main() {
 	log.Printf("---- listenlater starting ----")
 
 	cfg := LoadConfig(filepath.Join(base, "config.txt"))
+	BtnSwap = cfg.SwapBtn
 	InitFonts()
 
 	fb, err := OpenFB(cfg)
@@ -85,7 +86,7 @@ func main() {
 		c := fb.Canvas()
 		FillRect(c, fb.Bounds(), 255)
 		DrawStringTop(c, H1, "Listen Later closed", 80, fb.Bounds().Dy()/2-80, 0)
-		DrawStringTop(c, Body, "press power to sleep/wake — Kobo will redraw", 80, fb.Bounds().Dy()/2+20, 0)
+		DrawStringTop(c, Body, "restarting Kobo home — takes ~20 seconds", 80, fb.Bounds().Dy()/2+20, 0)
 		fb.Refresh(fb.Bounds(), RefreshFull)
 		time.Sleep(400 * time.Millisecond) // let the update reach the panel
 		touch.Ungrab()
