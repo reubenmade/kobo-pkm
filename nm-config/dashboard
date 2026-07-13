@@ -1,0 +1,9 @@
+# NickelMenu config for Listen Later on the Kobo.
+# Copied to KOBOeReader/.adds/nm/dashboard by deploy scripts.
+# Docs: https://pgaskin.net/NickelMenu/
+
+# Native app (primary): full-screen dashboard/reader with pen + notes.
+menu_item :main :Listen Later :cmd_spawn :quiet:/mnt/onboard/.adds/listenlater/run.sh
+
+# Browser POC (kept for comparison while iterating).
+menu_item :main :LL dashboard (web) :nickel_browser :open:file:///mnt/onboard/.adds/dashboard/index.html

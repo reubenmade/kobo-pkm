@@ -1,0 +1,14 @@
+# listenlater device config — edit over USB, takes effect on next launch.
+#
+# rot: logical->native framebuffer rotation. -1 = auto (assume portrait,
+#      rotate if the native fb is landscape). Try 0/1/2/3 if the screen
+#      comes up rotated or mirrored.
+rot = -1
+# Touch axis correction: if taps land in the wrong place, flip these.
+# swap: exchange x/y — "auto" detects from digitizer vs screen aspect.
+swap = auto
+mirx = 0
+# Libra Colour: digitizer Y runs opposite to the screen
+miry = 1
+# touchdev: force a specific input device (default: auto-detect)
+# touchdev = /dev/input/event1

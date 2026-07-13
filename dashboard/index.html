@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Dashboard</title>
+<style>
+  /* E-ink friendly: pure black on white, no greys lighter than #666,
+     no animations, chunky touch targets. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #fff; color: #000; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    padding: 14px;
+    font-size: 20px;
+    line-height: 1.35;
+  }
+  header { border-bottom: 4px solid #000; padding-bottom: 8px; margin-bottom: 14px; }
+  #date-line { font-size: 34px; font-weight: bold; }
+  #weather-line { font-size: 20px; margin-top: 4px; }
+  section { border: 2px solid #000; padding: 10px 12px; margin-bottom: 14px; }
+  h2 {
+    font-size: 16px; text-transform: uppercase; letter-spacing: 2px;
+    font-family: Helvetica, Arial, sans-serif;
+    border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 8px;
+  }
+  ul { list-style: none; }
+  li { padding: 6px 0; border-bottom: 1px dotted #666; }
+  li:last-child { border-bottom: none; }
+  .time { font-family: Helvetica, Arial, sans-serif; font-size: 16px; font-weight: bold; margin-right: 8px; }
+  .todo-box {
+    display: inline-block; width: 22px; height: 22px; border: 2px solid #000;
+    vertical-align: middle; margin-right: 10px; text-align: center;
+    font-size: 18px; line-height: 20px; font-family: Helvetica, Arial, sans-serif;
+  }
+  li.done { text-decoration: line-through; }
+  .read-title { font-weight: bold; }
+  .read-meta { font-size: 16px; color: #333; font-family: Helvetica, Arial, sans-serif; }
+  .progress { height: 10px; border: 1px solid #000; margin-top: 4px; }
+  .progress span { display: block; height: 100%; background: #000; }
+  blockquote { font-style: italic; font-size: 22px; padding: 4px 8px; }
+  .hl-source { text-align: right; font-size: 15px; font-family: Helvetica, Arial, sans-serif; margin-top: 6px; }
+  button {
+    font-family: Helvetica, Arial, sans-serif; font-size: 18px; font-weight: bold;
+    background: #fff; color: #000; border: 3px solid #000;
+    padding: 10px 16px; margin: 4px 6px 4px 0;
+  }
+  button.active { background: #000; color: #fff; }
+  #note-text {
+    width: 100%; height: 90px; font-family: Georgia, serif; font-size: 18px;
+    border: 2px solid #000; padding: 8px; margin-bottom: 6px;
+  }
+  /* Toolbar stays above the ink layer so Pen can be toggled off. */
+  #toolbar { margin-bottom: 14px; position: relative; z-index: 20; }
+  #status { font-family: Helvetica, Arial, sans-serif; font-size: 15px; padding: 4px 0; min-height: 22px; }
+  /* Full-page drawing layer. pointer-events toggled by pen mode. */
+  #ink {
+    position: absolute; top: 0; left: 0; z-index: 10;
+    pointer-events: none;
+  }
+  body.pen-mode #ink { pointer-events: auto; }
+  body.pen-mode { border: 6px solid #000; }
+</style>
+</head>
+<body>
+
+<canvas id="ink"></canvas>
+
+<header>
+  <div id="date-line">…</div>
+  <div id="weather-line">☀ 18°C, clear — light SW breeze (mock)</div>
+</header>
+
+<div id="toolbar">
+  <button id="btn-pen">✎ Pen</button>
+  <button id="btn-clear">Clear ink</button>
+  <button id="btn-save">Save notes</button>
+  <button id="btn-next-hl">Next highlight</button>
+  <div id="status"></div>
+</div>
+
+<section id="events">
+  <h2>Today</h2>
+  <ul>
+    <li><span class="time">09:30</span>Standup call</li>
+    <li><span class="time">12:00</span>Lunch with Anna</li>
+    <li><span class="time">15:00</span>Homeserver maintenance window</li>
+    <li><span class="time">19:30</span>Gym</li>
+  </ul>
+</section>
+
+<section id="todos">
+  <h2>Todo</h2>
+  <ul id="todo-list">
+    <li data-i="0"><span class="todo-box"></span>Fix cleanup cron on listen-later</li>
+    <li data-i="1"><span class="todo-box"></span>Read chapter 4 of current book</li>
+    <li data-i="2"><span class="todo-box"></span>Order stylus nibs</li>
+    <li data-i="3"><span class="todo-box"></span>Water the plants</li>
+  </ul>
+</section>
+
+<section id="reads">
+  <h2>Current reads</h2>
+  <ul>
+    <li>
+      <div class="read-title">The Shallows — Nicholas Carr</div>
+      <div class="read-meta">62% · ~2h left</div>
+      <div class="progress"><span style="width:62%"></span></div>
+    </li>
+    <li>
+      <div class="read-title">How Buildings Learn — Stewart Brand</div>
+      <div class="read-meta">18% · ~6h left</div>
+      <div class="progress"><span style="width:18%"></span></div>
+    </li>
+  </ul>
+</section>
+
+<section id="highlight">
+  <h2>Highlight loop</h2>
+  <blockquote id="hl-text">…</blockquote>
+  <div class="hl-source" id="hl-source"></div>
+</section>
+
+<section id="notes">
+  <h2>Quick note</h2>
+  <textarea id="note-text" placeholder="Type a note…"></textarea>
+</section>
+
+<script>
+// ES5 only — the Kobo browser is an old QtWebKit build.
+(function () {
+  "use strict";
+
+  var STORE_KEY = "ll-dashboard-v1";
+
+  // ---------- mock data (server-provided later) ----------
+  var highlights = [
+    { text: "We become, neurologically, what we think.", src: "The Shallows" },
+    { text: "All buildings are predictions. All predictions are wrong.", src: "How Buildings Learn" },
+    { text: "The best way to predict the future is to invent it.", src: "Alan Kay" }
+  ];
+  var hlIndex = 0;
+
+  // ---------- state ----------
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  function saveState() {
+    var state = {
+      note: document.getElementById("note-text").value,
+      todos: doneTodos,
+      strokes: strokes,
+      savedAt: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      setStatus("Saved locally at " + new Date().toLocaleTimeString());
+    } catch (e) {
+      setStatus("Save failed: " + e.message);
+    }
+    // Later: POST the same payload to the listen-later server.
+    // var xhr = new XMLHttpRequest();
+    // xhr.open("POST", "https://listen.iamareuben.xyz/api/kobo/notes", true);
+    // xhr.setRequestHeader("Content-Type", "application/json");
+    // xhr.send(JSON.stringify(state));
+  }
+  function setStatus(msg) {
+    document.getElementById("status").innerHTML = msg;
+  }
+
+  // ---------- date header ----------
+  var days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var months = ["January","February","March","April","May","June","July",
+                "August","September","October","November","December"];
+  var now = new Date();
+  document.getElementById("date-line").innerHTML =
+    days[now.getDay()] + " " + now.getDate() + " " + months[now.getMonth()];
+
+  // ---------- highlights loop ----------
+  function showHighlight() {
+    document.getElementById("hl-text").innerHTML = "“" + highlights[hlIndex].text + "”";
+    document.getElementById("hl-source").innerHTML = "— " + highlights[hlIndex].src;
+  }
+  document.getElementById("btn-next-hl").onclick = function () {
+    hlIndex = (hlIndex + 1) % highlights.length;
+    showHighlight();
+  };
+  showHighlight();
+
+  // ---------- todos ----------
+  var doneTodos = {};
+  var todoList = document.getElementById("todo-list");
+  todoList.onclick = function (e) {
+    var li = e.target || e.srcElement;
+    while (li && li.nodeName !== "LI") li = li.parentNode;
+    if (!li) return;
+    var i = li.getAttribute("data-i");
+    doneTodos[i] = !doneTodos[i];
+    renderTodos();
+  };
+  function renderTodos() {
+    var items = todoList.getElementsByTagName("li");
+    for (var i = 0; i < items.length; i++) {
+      var key = items[i].getAttribute("data-i");
+      var box = items[i].getElementsByTagName("span")[0];
+      if (doneTodos[key]) {
+        items[i].className = "done";
+        box.innerHTML = "✕";
+      } else {
+        items[i].className = "";
+        box.innerHTML = "";
+      }
+    }
+  }
+
+  // ---------- pen / ink layer ----------
+  var canvas = document.getElementById("ink");
+  var ctx = canvas.getContext("2d");
+  var strokes = [];        // array of arrays of [x, y]
+  var current = null;
+  var penMode = false;
+
+  function sizeCanvas() {
+    // Cover the whole document, not just the viewport, so ink can
+    // annotate anywhere on the page.
+    canvas.width = document.body.scrollWidth;
+    canvas.height = Math.max(document.body.scrollHeight, window.innerHeight);
+    redraw();
+  }
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#000";
+    for (var s = 0; s < strokes.length; s++) {
+      var st = strokes[s];
+      if (st.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(st[0][0], st[0][1]);
+      for (var p = 1; p < st.length; p++) ctx.lineTo(st[p][0], st[p][1]);
+      ctx.stroke();
+    }
+  }
+  function pointFromEvent(e) {
+    var t = (e.touches && e.touches.length) ? e.touches[0] : e;
+    var x = t.pageX !== undefined ? t.pageX : t.clientX + (window.pageXOffset || 0);
+    var y = t.pageY !== undefined ? t.pageY : t.clientY + (window.pageYOffset || 0);
+    return [x, y];
+  }
+  function penDown(e) {
+    if (!penMode) return;
+    current = [pointFromEvent(e)];
+    strokes.push(current);
+    if (e.preventDefault) e.preventDefault();
+  }
+  function penMove(e) {
+    if (!penMode || !current) return;
+    var pt = pointFromEvent(e);
+    current.push(pt);
+    // Draw incrementally instead of full redraws — cheaper on e-ink.
+    var prev = current[current.length - 2];
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#000";
+    ctx.beginPath();
+    ctx.moveTo(prev[0], prev[1]);
+    ctx.lineTo(pt[0], pt[1]);
+    ctx.stroke();
+    if (e.preventDefault) e.preventDefault();
+  }
+  function penUp() { current = null; }
+
+  canvas.addEventListener("touchstart", penDown, false);
+  canvas.addEventListener("touchmove", penMove, false);
+  canvas.addEventListener("touchend", penUp, false);
+  canvas.addEventListener("mousedown", penDown, false);
+  canvas.addEventListener("mousemove", penMove, false);
+  canvas.addEventListener("mouseup", penUp, false);
+
+  var btnPen = document.getElementById("btn-pen");
+  btnPen.onclick = function () {
+    penMode = !penMode;
+    btnPen.className = penMode ? "active" : "";
+    document.body.className = penMode ? "pen-mode" : "";
+    setStatus(penMode ? "Pen on — draw anywhere. Tap ✎ Pen again to interact with the page."
+                      : "Pen off");
+  };
+  document.getElementById("btn-clear").onclick = function () {
+    strokes = [];
+    redraw();
+    setStatus("Ink cleared");
+  };
+  document.getElementById("btn-save").onclick = saveState;
+
+  // ---------- restore ----------
+  var saved = loadState();
+  if (saved.note) document.getElementById("note-text").value = saved.note;
+  if (saved.todos) { doneTodos = saved.todos; renderTodos(); }
+  if (saved.strokes) strokes = saved.strokes;
+  sizeCanvas();
+  if (saved.savedAt) setStatus("Restored notes from " + saved.savedAt);
+})();
+</script>
+</body>
+</html>
