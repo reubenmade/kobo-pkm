@@ -116,7 +116,6 @@ that nearly all Kobo documentation/code assumes.
 - Word-level text selection & annotation with visual feedback
 - Popovers/modals/on-screen keyboard — a real UI toolkit, hand-rolled
 - Battery/frontlight read *and* frontlight write via sysfs
-- Physical-button reading (mechanism proven; device TBD)
 - Offline-first annotation queue ready for server sync
 
 ## 4. Not possible / not worth it
