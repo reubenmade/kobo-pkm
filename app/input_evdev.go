@@ -180,9 +180,17 @@ func OpenKeys() (*KeyReader, error) {
 		syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgname(256), uintptr(unsafe.Pointer(&name[0])))
 		n := strings.ToLower(strings.TrimRight(string(name), "\x00"))
 		if strings.Contains(n, "gpio-keys") || strings.Contains(n, "gpio_keys") {
+			// Diagnostic: test whether something else (Nickel?) holds an
+			// exclusive grab — EBUSY (16) here would explain the silent
+			// buttons. Read WITHOUT keeping a grab so delivery is observable
+			// in either case.
 			grab := 1
-			syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgrab, uintptr(unsafe.Pointer(&grab)))
-			log.Printf("keys: using %s (%q), grabbed", path, n)
+			_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgrab, uintptr(unsafe.Pointer(&grab)))
+			log.Printf("keys: using %s (%q), grab test errno=%d (0=ok, 16=EBUSY held elsewhere)", path, n, errno)
+			if errno == 0 {
+				grab = 0
+				syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), eviocgrab, uintptr(unsafe.Pointer(&grab)))
+			}
 			return &KeyReader{f: f}, nil
 		}
 		f.Close()
