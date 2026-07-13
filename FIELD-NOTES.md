@@ -84,9 +84,12 @@ that nearly all Kobo documentation/code assumes.
 - The Kobo Stylus (MPP) arrives through the same touch pipeline — taps skitter
   a few px, so gesture code needs "reached a different word" (not just a pixel
   threshold) before treating movement as a drag.
-- Physical page-turn buttons: **still unlocated** — silent on `gpio-keys` and
-  the PMIC key device. `/proc/bus/input/devices` dump (captured at launch into
-  `input-devices.txt`) will name the device + key bitmap. TODO.
+- Physical page-turn buttons: **located and confirmed unreachable while Nickel
+  runs.** They are keys 193/194 (F23/F24) on `gpio-keys` — but **Nickel holds an
+  EVIOCGRAB exclusive grab** on that device (our grab attempt returns EBUSY and
+  an ungrabbed reader receives nothing). Getting the buttons requires the
+  KOReader model: kill Nickel for the session and restart it on exit. Filed as
+  a deliberate future fork, not a bug.
 - Corner-exit safety gesture: corners are closed under any swap/mirror error,
   so "3 taps in a top corner exits" works even when calibration is wrong. Keep
   it away from the bottom corners — footer buttons live there.
@@ -196,8 +199,10 @@ that's the product, not a limitation.
 
 ## 7. Architecture next steps
 
-1. `/proc/bus/input/devices` read → map physical buttons (data already being
-   captured on-device)
+1. Decide the Nickel question: coexist (current, no physical buttons) vs
+   kill-and-restart Nickel per session (KOReader model — buttons, no sleep-timer
+   interference, full device ownership, at the cost of ~15s Nickel restart on
+   exit and owning sleep/power management ourselves)
 2. Sync worker: drain `data/queue/` → `POST /api/kobo/annotations`; pull
    article JSON + dashboard data + sleep-screen image (Wi-Fi via NickelDBus)
 3. Server-side handwriting-to-text over stroke JSON; typed notes flow back
