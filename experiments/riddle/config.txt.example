@@ -1,0 +1,40 @@
+# riddle on Kobo — config. Copy to config.txt next to the binary.
+
+# ---- the oracle (any OpenAI-compatible /chat/completions endpoint) ----
+# "fake" streams a canned reply with no network — good for a first launch.
+oracle_key = fake
+#oracle_key = sk-...
+#oracle_base = https://api.openai.com/v1
+#oracle_model = gpt-4o-mini          # must be vision-capable
+#oracle_reasoning = low              # thinking models only; omit otherwise
+#oracle_max_tokens = 2000            # runaway guard; keep roomy
+
+# ---- the diary's memory ----
+#memory = off              # no storage, nothing extra sent with requests
+#memory_turns = 6          # recent pages sent as conversation context
+tz_offset = 12             # hours from UTC — NZ time; memory dates read right
+
+# ---- device ----
+deadman_min = 60           # auto-exit safety net; 0 disables
+#keep_page = 1             # keep /tmp/riddle-page.png for debugging
+
+# ---- touch calibration (see kobo-pkm FIELD-NOTES.md) ----
+# Libra Colour: axes transposed + Y mirrored.
+#swap = auto
+miry = 1
+#mirx = 0
+#rot = -1
+#touchdev = /dev/input/event1
+
+# ---- pen ----
+# The elan tracks the pen while it hovers; contact starts at this raw
+# pressure (0..4095). Raise it if strokes still connect between lifts.
+pen_touch_min = 30
+# One log line per digitizer frame (first ~4000) — for decoding hover,
+# eraser, and side-button behaviour. Turn off once the pen feels right.
+input_debug = 1
+
+# ---- sleep (added 2026-07-14) ----
+# arm gpio-keys as suspend wake source (cover wake) — EXPERIMENTAL:
+# broke waking entirely on first trial, leave off unless testing
+#wake_gpio = 1
