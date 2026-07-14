@@ -9,6 +9,15 @@ export QT_GSTREAMER_PLAYBIN_AUDIOSINK_DEVICE_PARAMETER=bluealsa:DEV=00:00:00:00:
 cd /
 unset OLDPWD
 
+# Heal a stranded NickelMenu quarantine: NM renames libnm.so ->
+# libnm.so.failsafe on every nickel start and renames it back ~20s later.
+# A hard reboot / nickel death inside that window strands the rename and NM
+# silently never loads again — undo it before nickel starts.
+NM=/usr/local/Kobo/imageformats/libnm.so
+if [ -e "$NM.failsafe" ] && [ ! -e "$NM" ]; then
+    mv "$NM.failsafe" "$NM" && echo "restart-nickel: healed stranded NickelMenu failsafe"
+fi
+
 # boot spinner; nickel kills it once it's up
 /etc/init.d/on-animator.sh &
 

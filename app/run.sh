@@ -9,6 +9,16 @@ LOG="$BASE/log.txt"
 echo "$(date): launching listenlater (nickel takeover)" >> "$LOG"
 sync
 
+# NickelMenu quarantines its library for ~20s after every nickel start and
+# self-UNINSTALLS if nickel dies during that window — wait it out before
+# the kill, or launching too soon after boot silently removes NM.
+t=0
+while [ -e /usr/local/Kobo/imageformats/libnm.so.failsafe ]; do
+    t=$((t + 1))
+    [ "$t" -ge 30 ] && break
+    sleep 1
+done
+
 killall -q -TERM nickel hindenburg sickel fickel strickel fontickel adobehost foxitpdf iink dhcpcd-dbus dhcpcd bluealsa bluetoothd fmon nanoclock.lua 2>/dev/null
 
 # wait for nickel to actually die (max ~5s)
