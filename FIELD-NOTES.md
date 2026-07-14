@@ -28,6 +28,11 @@ A single static Go binary (`app/`) that fully takes over the device:
 Deploy loop: `./deploy-app.sh` (cross-compiles, copies over USB), eject, launch
 from NickelMenu. No toolchain beyond Go on the Mac.
 
+Also: **`experiments/riddle/`** — a full Go port of the reMarkable "Tom
+Riddle diary" (pen → vision LLM → animated handwritten reply). It's the
+pen-interaction testbed: pressure-width ink, hover, eraser, side button,
+sleep cover, and the stylus findings in §2 below all came out of it.
+
 ---
 
 ## 2. Hard-won device facts (Libra Colour, FW 4.45.23697)
@@ -93,6 +98,113 @@ that nearly all Kobo documentation/code assumes.
 - Corner-exit safety gesture: corners are closed under any swap/mirror error,
   so "3 taps in a top corner exits" works even when calibration is wrong. Keep
   it away from the bottom corners — footer buttons live there.
+
+### Stylus, decoded (riddle experiment, 2026-07-14)
+
+Everything below is empirical, from frame-level evdev logging of the elan
+touchscreen with the Kobo Stylus 2 (`experiments/riddle/`, logs archived on
+device as `log-session*.txt`).
+
+- **The digitizer streams the pen while it HOVERS.** The MT tracking ID stays
+  alive the whole time the pen is in range — treating "tracked" as "touching"
+  inks connecting lines between strokes. **Contact = pressure ≥ threshold,
+  nothing else.** (~30 of 4095 works; pressure arrives one frame after
+  tracking starts, so the first frame of a real touch reads p=0.)
+- **BTN_TOUCH is a trap:** the elan holds BTN_TOUCH=1 for the entire
+  pen-in-range period, hover included. It must never vouch for contact.
+  (This mistake shipped twice before the frame log caught it.)
+- **Hover is a real, usable input channel**: position streams at full rate
+  with p=0 and `ABS_MT_DISTANCE`=15 (contact reads d=0). Free primitive for
+  hover cursors / reveal-on-approach. Key **236** pulses as a pen-detect
+  (in-range) signal alongside it.
+- **Pen buttons:** key **331** (BTN_STYLUS) = the tail **eraser**; key
+  **332** (BTN_STYLUS2) = the **side button**. Clean 1/0 press/release on
+  both. BTN_TOOL_RUBBER never fires. (Don't infer the mapping from log
+  timing patterns — verify on device; we had it backwards once.)
+- **Pressure is honest and useful**: 0..4095, smooth ramps, good enough to
+  drive stroke width directly. **Fingers report real pressure too** (~2000
+  raw), so one pressure gate serves pen and finger alike, and
+  `ABS_MT_TOOL_TYPE` distinguishes them (0=finger, 1=pen).
+- Also present, unexplored: tilt axes 26/27 (always 0 so far — may need
+  angle), TOUCH_MAJOR ≈539 for the pen tip, and an undecoded Elan-specific
+  axis pair 41/42.
+- Page-turn buttons **confirmed grabbable with Nickel dead** (gpio-keys
+  193/194, EVIOCGRAB succeeds) — the takeover fork works as planned.
+- Sleep inputs: power button = key **116**, sleep-cover hall sensor = keys
+  **35/59** (pwrkey/gpio devices).
+- **Suspend/wake on the MTK kernel: WORKING, after three mis-diagnoses.**
+  The write to `/sys/power/state` BLOCKS for the entire sleep and returns
+  nil only after resume — **that return IS the wake signal**. This kernel
+  has NO `/sys/power/suspend_stats`, so polling a success counter reads 0
+  forever and labels real sleeps as failures (an 83s successful
+  suspend+power-wake was dismissed as "aborted" this way). Cover-open AND
+  power-button wake both work with the default wakeup arming (platform
+  gpio-keys ships enabled; don't touch it — disarming it was another wrong
+  turn, and enableWakeup on the input-class node broke waking entirely
+  once). Historical detail of the wrong turns below:
+- **Suspend prerequisites on the MTK kernel (the parts that were right):** direct
+  `mem > /sys/power/state` writes EPERM even with `autosleep=off` and
+  `state-extended=1`. KOReader's discipline (device.lua) is what's missing:
+  **kill Wi-Fi before every suspend** (the wmt driver blocks suspend while
+  the radio is up — every EPERM session here had wlan0 up), and **never
+  suspend while plugged in/charging — it hangs the MTK kernel**. Full
+  sequence: skip if charging; frontlight → 0 (independently powered LED);
+  wifi down (`ifconfig wlan0 down` + `0 > /dev/wmtWifi`);
+  `1 > /sys/power/state-extended`; settle ~2s + sync; `mem >
+  /sys/power/state` confirmed via `/sys/power/suspend_stats/success` with
+  retries; reverse everything on wake. **Never trust a sleep card — verify
+  via suspend_stats/success** (a "sleeping" device may be awake and
+  retrying). A startup `pmProbe` logs the whole /sys/power layout.
+- **The Kobo has no CA root store where Go looks** — any HTTPS call from a
+  Go binary fails `x509: certificate signed by unknown authority` (Wi-Fi
+  can be perfectly healthy; check operstate/carrier before blaming the
+  network). Fix: `import _ "golang.org/x/crypto/x509roots/fallback"`
+  (embedded Mozilla roots, ~300KB), or ship a bundle + SSL_CERT_FILE.
+- **Nickel powers the Wi-Fi chip down as it dies** — a takeover app that
+  needs network must revive it: `1 > /dev/wmtWifi`, `ifconfig wlan0 up`,
+  wpa_supplicant against Nickel's own `/etc/wpa_supplicant/wpa_supplicant.conf`
+  (it maintains known networks there — KOReader leans on the same file),
+  then dhcpcd. Cover close = key 35 on gpio-keys (autorepeats while
+  closed); key 59 possibly the open edge (undecoded).
+- **Wake sources are per-device and mostly disarmed**: the power button's
+  PMIC (`bd71828-pwrkey`) wakes the system out of the box, but the sleep
+  cover's hall sensor (gpio-keys) ships with `power/wakeup` disabled —
+  Nickel arms it at sleep time. Write `enabled` to
+  `/sys/class/input/inputN/device/power/wakeup` for the gpio-keys device or
+  only the power button wakes a suspended takeover app.
+- **A "spontaneous reboot" may be your own recovery code**: what looked
+  like suspend crash-rebooting the device (boot animation on wake!) was the
+  app's stall watchdog exiting during slow suspend retries — run.sh's
+  Nickel restart plays `on-animator.sh`, i.e. the boot spinner. Any
+  watchdog must be fed by (or disarmed around) intentionally-blocking paths
+  like suspend, and "reboot symptoms" deserve a log check before kernel
+  theories.
+
+### Nickel-takeover hazards (each cost us a session)
+
+- **NickelMenu "disappears" if Nickel dies (or the device hard-reboots)
+  within ~20s of a Nickel start.** It's not an uninstall: NM's failsafe
+  RENAMES its library (`/usr/local/Kobo/imageformats/libnm.so` →
+  `libnm.so.failsafe`) on every start and renames it back ~20s later — die
+  inside the window and the lib stays stranded under the wrong name, so NM
+  never loads again (`.adds/nm/` config survives, which makes it look
+  spooky). Four losses before the defenses were complete. Three layers now:
+  run.sh waits for `libnm.so.failsafe` to vanish before the killall;
+  restart-nickel.sh heals a stranded rename before starting Nickel; and —
+  the one that closes the loop — a **boot-time udev heal** on the rootfs
+  (`/etc/udev/rules.d/98-nm-heal.rules` → `/usr/local/nm-heal/heal.sh`,
+  fires on loop0 like kfmon, before Nickel), so ANY power cut self-repairs
+  on the next boot. Installer with NM + heal bundled:
+  `vendor/KoboRoot-nickelmenu-v0.6.0+heal.tgz` → `.kobo/KoboRoot.tgz`, eject.
+- **Don't take over right after a USB eject** — Nickel is mid content-import
+  and killing it there (suspected) hard-wedged the device once. Wait ~30s.
+- **Assume the log dies with the device**: FAT loses unsynced writes on hard
+  restart — the wedged session left literally nothing, not even run.sh's
+  first echo. Fsync the log every ~2s, and run an in-app stall watchdog that
+  dumps all goroutine stacks to the log before exiting (a wedge with input
+  grabbed is indistinguishable from a kernel hang otherwise).
+- A takeover app that needs network must **spare dhcpcd** in the kill list
+  and have Wi-Fi up before launch — with Nickel dead nothing can raise it.
 
 ### Toolchain & iteration
 - Pure-Go, CGO-free, `GOOS=linux GOARCH=arm GOARM=7`: single ~3MB static binary,
