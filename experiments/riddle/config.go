@@ -28,6 +28,11 @@ type Config struct {
 	// WakeGPIO arms gpio-keys as a suspend wakeup source (cover wake).
 	// EXPERIMENTAL: broke waking entirely on first trial — default off.
 	WakeGPIO bool
+	// StateExtended is what sleep writes to /sys/power/state-extended
+	// (gSleep_Mode_Suspend): "1" = deep NTX suspend (default; cover+power
+	// wake), "0"/"skip" = experiment — Nickel's sleep keeps the page
+	// buttons wake-capable, ours doesn't, and this flag is the suspect.
+	StateExtended string
 
 	// The oracle. Key "fake" streams a canned reply (no network) — useful
 	// on-device before Wi-Fi is sorted, and in the simulator.
@@ -51,6 +56,7 @@ func LoadConfig(path string) Config {
 	cfg := Config{
 		Rot:             -1,
 		PenTouchMin:     30,
+		StateExtended:   "1",
 		OracleBase:      "https://api.openai.com/v1",
 		OracleModel:     "gpt-4o-mini",
 		OracleMaxTokens: 2000,
@@ -119,6 +125,8 @@ func (c *Config) set(k, v string) {
 		c.InputDebug = truthy
 	case "wake_gpio":
 		c.WakeGPIO = truthy
+	case "state_extended":
+		c.StateExtended = v
 	case "oracle_key":
 		c.OracleKey = v
 	case "oracle_base":

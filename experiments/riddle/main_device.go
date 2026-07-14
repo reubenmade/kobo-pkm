@@ -296,7 +296,9 @@ func sleepDiary(fb *FB, diary *Diary, touches chan Touch, keys chan int) {
 		wifiDown()
 		beat()
 	}
-	writeSysfs("/sys/power/state-extended", "1")
+	if diary.cfg.StateExtended != "skip" {
+		writeSysfs("/sys/power/state-extended", diary.cfg.StateExtended)
+	}
 	beat()
 	time.Sleep(2 * time.Second) // KOReader settles exactly this long; PM hooks need it
 	syscall.Sync()
@@ -346,7 +348,9 @@ func sleepDiary(fb *FB, diary *Diary, touches chan Touch, keys chan int) {
 		beat()
 	}
 	log.Printf("waking")
-	writeSysfs("/sys/power/state-extended", "0")
+	if diary.cfg.StateExtended != "skip" {
+		writeSysfs("/sys/power/state-extended", "0")
+	}
 	if autosleep0 != "" && autosleep0 != "off" {
 		writeSysfs("/sys/power/autosleep", autosleep0)
 	}
@@ -471,6 +475,15 @@ func pmProbe() {
 		st, _ := os.ReadFile(filepath.Join(p, "status"))
 		log.Printf("pm: supply %s online=%q status=%q", filepath.Base(p),
 			strings.TrimSpace(string(on)), strings.TrimSpace(string(st)))
+	}
+	// NTX kernels sometimes hang custom wake knobs off the key driver —
+	// list gpio-keys' attributes so we know what's on offer.
+	if ents, err := os.ReadDir("/sys/devices/platform/gpio-keys"); err == nil {
+		names := make([]string, 0, len(ents))
+		for _, e := range ents {
+			names = append(names, e.Name())
+		}
+		log.Printf("pm: gpio-keys attrs: %s", strings.Join(names, " "))
 	}
 }
 
