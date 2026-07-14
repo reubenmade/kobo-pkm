@@ -1,0 +1,3 @@
+# Heal a stranded NickelMenu failsafe rename at every boot (see heal.sh).
+# Same boot trigger kfmon uses: the onboard-partition loop device appearing.
+KERNEL=="loop0", ACTION=="add", RUN+="/usr/local/nm-heal/heal.sh"
