@@ -29,9 +29,9 @@ type Config struct {
 	// EXPERIMENTAL: broke waking entirely on first trial — default off.
 	WakeGPIO bool
 	// StateExtended is what sleep writes to /sys/power/state-extended
-	// (gSleep_Mode_Suspend): "1" = deep NTX suspend (default; cover+power
-	// wake), "0"/"skip" = experiment — Nickel's sleep keeps the page
-	// buttons wake-capable, ours doesn't, and this flag is the suspect.
+	// (gSleep_Mode_Suspend). "0" (default) suspends like Nickel: page
+	// buttons, cover, and power button all wake. "1" is KOReader's deeper
+	// suspend — buttons no longer wake (user-verified both ways).
 	StateExtended string
 
 	// The oracle. Key "fake" streams a canned reply (no network) — useful
@@ -56,7 +56,7 @@ func LoadConfig(path string) Config {
 	cfg := Config{
 		Rot:             -1,
 		PenTouchMin:     30,
-		StateExtended:   "1",
+		StateExtended:   "0",
 		OracleBase:      "https://api.openai.com/v1",
 		OracleModel:     "gpt-4o-mini",
 		OracleMaxTokens: 2000,

@@ -321,13 +321,15 @@ func sleepDiary(fb *FB, diary *Diary, touches chan Touch, keys chan int) {
 	// the EPD discharge timer) — retry those.
 	for attempt := 1; ; attempt++ {
 		beat()
-		t0 := time.Now()
+		// Wall-clock via Unix seconds: Go's monotonic clock PAUSES during
+		// suspend, so time.Since would report a 99s sleep as "0s".
+		t0 := time.Now().Unix()
 		err := os.WriteFile("/sys/power/state", []byte("mem"), 0o644)
 		if err == nil {
-			log.Printf("suspend returned after %v — we slept and woke", time.Since(t0).Round(time.Second))
+			log.Printf("suspend returned after %ds — we slept and woke", time.Now().Unix()-t0)
 			break
 		}
-		log.Printf("suspend refused (%v) after %v", err, time.Since(t0).Round(time.Millisecond))
+		log.Printf("suspend refused (%v) after %ds", err, time.Now().Unix()-t0)
 		// Keep the input channels drained while we hold the main loop —
 		// queued events must not block the readers or replay later.
 		for {
@@ -348,20 +350,23 @@ func sleepDiary(fb *FB, diary *Diary, touches chan Touch, keys chan int) {
 		beat()
 	}
 	log.Printf("waking")
+	// Screen FIRST: the writer judges wake by the page coming back, and the
+	// wifi revival below costs ~5s — doing it before the repaint made every
+	// wake look dead long enough to invite a second button press.
 	if diary.cfg.StateExtended != "skip" {
 		writeSysfs("/sys/power/state-extended", "0")
-	}
-	if autosleep0 != "" && autosleep0 != "off" {
-		writeSysfs("/sys/power/autosleep", autosleep0)
-	}
-	if wifiWasUp {
-		wifiUp()
 	}
 	if hadFL {
 		SetFrontlight(fl)
 	}
 	RestoreSleep(fb.Canvas(), saved)
 	fb.Refresh(fb.Bounds(), RefreshFull)
+	if autosleep0 != "" && autosleep0 != "off" {
+		writeSysfs("/sys/power/autosleep", autosleep0)
+	}
+	if wifiWasUp {
+		wifiUp()
+	}
 	// Discard input that queued while asleep — stale events would otherwise
 	// replay as phantom ink on the restored page.
 	for {
