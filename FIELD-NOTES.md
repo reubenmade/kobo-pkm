@@ -141,7 +141,15 @@ device as `log-session*.txt`).
   power-button wake both work with the default wakeup arming (platform
   gpio-keys ships enabled; don't touch it — disarming it was another wrong
   turn, and enableWakeup on the input-class node broke waking entirely
-  once). Historical detail of the wrong turns below:
+  once). **`state-extended` (gSleep_Mode_Suspend) decides the wake set:
+  write `0` and the suspend keeps ALL wake sources armed like Nickel's own
+  sleep — page buttons included; write `1` (KOReader-style deep suspend)
+  and only cover/power wake.** On wake, repaint the screen BEFORE the ~5s
+  wifi revival or the wake looks dead. Go's monotonic clock pauses across
+  suspend — measure sleep durations in wall-clock. The "vanished" session
+  logs from power cuts turn up as FSCK0000.00x fragments (boot fsck
+  salvages orphaned FAT clusters). Historical detail of the wrong turns
+  below:
 - **Suspend prerequisites on the MTK kernel (the parts that were right):** direct
   `mem > /sys/power/state` writes EPERM even with `autosleep=off` and
   `state-extended=1`. KOReader's discipline (device.lua) is what's missing:
