@@ -48,30 +48,50 @@ func (h *handler) Step() {
 	}
 }
 
-// push sends a changed region to the panel. A normal mode goes straight to the
-// framebuffer; modeVariant runs the ghosting lab's selected strategy so the
-// different redraw methods can be compared on the filter page.
+// push sends a changed region to the panel.
+//   - modeFlash:   a full-screen GC16 flash (clears all ghosting).
+//   - modeVariant: run the selected ghosting variant over ONLY the regions that
+//     changed (number strip + plot on the filter page), so the static prose and
+//     diagram are never re-driven and can't ghost.
+//   - anything else: a plain refresh of the given region.
 func (h *handler) push(r image.Rectangle, mode kit.RefreshMode) {
-	if mode != modeVariant {
+	switch mode {
+	case modeFlash:
+		h.rt.RefreshAll(kit.RefreshFull)
+	case modeVariant:
+		h.applyVariant()
+	default:
 		h.rt.Refresh(r, mode)
-		return
 	}
+}
+
+func (h *handler) applyVariant() {
 	v := h.d.CurrentVariant()
+	regions := h.d.ScrubRegions()
 	switch v.composite {
-	case 1: // white-flash then GC16: clear the region, then repaint clean
-		kit.FillRect(h.rt.Canvas(), r, kit.WHITE)
-		h.rt.Refresh(r, kit.RefreshFull)
+	case 1: // white-flash then GC16: clear each region, then repaint clean
+		for _, reg := range regions {
+			kit.FillRect(h.rt.Canvas(), reg, kit.WHITE)
+			h.rt.Refresh(reg, kit.RefreshFull)
+		}
 		h.d.Render()
-		h.rt.Refresh(r, kit.RefreshFull)
-	case 2: // fast DU, but a full GC16 flash every 8th update to shed ghosts
+		for _, reg := range regions {
+			h.rt.Refresh(reg, kit.RefreshFull)
+		}
+	case 2: // base waveform, with a GC16 flash every flashEvery updates
 		h.flashN++
-		if h.flashN%8 == 0 {
-			h.rt.Refresh(r, kit.RefreshFull)
-		} else {
-			h.rt.Refresh(r, kit.RefreshFast)
+		flash := v.flashEvery > 0 && h.flashN%v.flashEvery == 0
+		for _, reg := range regions {
+			if flash {
+				h.rt.Refresh(reg, kit.RefreshFull)
+			} else {
+				h.rt.Refresh(reg, v.mode)
+			}
 		}
 	default:
-		h.rt.Refresh(r, v.mode)
+		for _, reg := range regions {
+			h.rt.Refresh(reg, v.mode)
+		}
 	}
 }
 

@@ -90,10 +90,15 @@ type Doc struct {
 	scrubStartX int
 	scrubStart  float64
 
-	// Ghosting lab (filter page): which redraw variant is selected, and the
-	// hit box of the tap-to-cycle control.
+	// Ghosting lab (filter page): the selected redraw variant, the tap-to-cycle
+	// and flash control hit boxes, and the two regions that actually change
+	// during a scrub (so the static prose + diagram aren't re-driven and can't
+	// ghost).
 	variant    int
 	variantHit image.Rectangle
+	flashHit   image.Rectangle
+	numberBand image.Rectangle // full-width strip over the Fc/Q line(s)
+	plotRect   image.Rectangle
 
 	// Reactor info popover (Brighter page): its hover target, and whether it's
 	// currently shown.
@@ -304,54 +309,67 @@ func (d *Doc) renderProp21(x, w int) {
 
 // ---- ghosting lab ---------------------------------------------------------
 
-// modeVariant is a sentinel RefreshMode: when HandleTouch returns it, the
-// device handler applies the currently-selected ghosting variant (which may be
-// a plain waveform or a multi-step strategy) instead of a fixed refresh.
-const modeVariant kit.RefreshMode = 100
+// Sentinel RefreshModes handled specially by the device handler (they don't
+// map to a single waveform):
+//   - modeVariant: apply the selected ghosting variant to the dynamic regions.
+//   - modeFlash:   a full-screen GC16 flash to clear all ghosting.
+const (
+	modeVariant kit.RefreshMode = 100
+	modeFlash   kit.RefreshMode = 101
+)
 
 // A redraw variant is a named way to push a changed region to the panel, for
 // comparing how each one ghosts. composite 0 = the plain waveform in mode;
-// 1 = white-flash then GC16 (de-ghost); 2 = fast DU but a GC16 flash every 8th
-// update (a practical hybrid). paintMs is roughly how long that update takes to
-// finish on the panel — we never issue a scrub update faster than this, so
-// updates can't pile up in the controller and drain for seconds after you stop.
+// 1 = white-flash then GC16 (de-ghost); 2 = the base waveform in mode with a
+// GC16 flash every flashEvery updates. paintMs is roughly how long the update
+// takes to finish on the panel — we never issue a scrub update faster than
+// this, so updates can't pile up in the controller and drain for seconds after
+// you stop.
 type redrawVariant struct {
-	name      string
-	mode      kit.RefreshMode
-	composite int
-	paintMs   int
+	name       string
+	mode       kit.RefreshMode
+	composite  int
+	paintMs    int
+	flashEvery int // composite 2 only: GC16 flash cadence
 }
 
 var redrawVariants = []redrawVariant{
-	{"DU . partial  (default fast)", kit.RefreshFast, 0, 230},
-	{"DU . full", kit.RefreshDUFull, 0, 260},
-	{"A2 . forced  (pen mode)", kit.RefreshPen, 0, 120},
-	{"A2 . partial", kit.RefreshA2, 0, 120},
-	{"GC16 . partial  (clean, no flash)", kit.RefreshGC16Part, 0, 450},
-	{"GC16 . full flash", kit.RefreshFull, 0, 600},
-	{"AUTO . partial", kit.RefreshAuto, 0, 300},
-	{"AUTO . full", kit.RefreshAutoFull, 0, 450},
-	{"white-flash + GC16  (de-ghost)", kit.RefreshFull, 1, 1100},
-	{"DU + GC16 flash every 8th", kit.RefreshFast, 2, 260},
+	{"A2 pen + flash /10", kit.RefreshPen, 2, 120, 10},
+	{"A2 pen (super fast)", kit.RefreshPen, 0, 120, 0},
+	{"DU partial", kit.RefreshFast, 0, 230, 0},
+	{"DU + flash /8", kit.RefreshFast, 2, 260, 8},
+	{"A2 partial", kit.RefreshA2, 0, 120, 0},
+	{"DU full", kit.RefreshDUFull, 0, 260, 0},
+	{"GC16 partial", kit.RefreshGC16Part, 0, 450, 0},
+	{"GC16 flash", kit.RefreshFull, 0, 600, 0},
+	{"AUTO partial", kit.RefreshAuto, 0, 300, 0},
+	{"white-flash + GC16", kit.RefreshFull, 1, 1100, 0},
 }
 
 func (d *Doc) CurrentVariant() redrawVariant { return redrawVariants[d.variant] }
 
-// renderVariantControl draws the tap-to-cycle redraw picker; returns the y below it.
+// renderVariantControl draws the tap-to-cycle redraw picker plus a flash
+// button; returns the y below it. The left area cycles the variant (and flashes
+// clean); the right button flashes on demand.
 func (d *Doc) renderVariantControl(x, y, w int) int {
 	const h = 56
-	r := image.Rect(x, y, x+w, y+h)
-	kit.Frame(d.c, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 2, kit.BLACK)
-	d.variantHit = r
-	v := d.CurrentVariant()
+	const flashW = 168
+	kit.Frame(d.c, x, y, w, h, 2, kit.BLACK)
+
+	d.variantHit = image.Rect(x, y, x+w-flashW, y+h)
+	d.flashHit = image.Rect(x+w-flashW, y, x+w, y+h)
+	// divider between the picker and the flash button
+	kit.FillRect(d.c, image.Rect(d.flashHit.Min.X, y+2, d.flashHit.Min.X+2, y+h-2), kit.BLACK)
+
 	by := y + h/2 + kit.Small.Line/2 - 4
-	lead := fmt.Sprintf("ghosting lab   [%d/%d]   ", d.variant+1, len(redrawVariants))
+	lead := fmt.Sprintf("ghosting lab  [%d/%d]  ", d.variant+1, len(redrawVariants))
 	lx := x + 16
 	kit.DrawString(d.c, kit.Small, lead, lx, by, kit.GRAY)
 	lx += kit.Measure(kit.Small, lead)
-	kit.DrawString(d.c, kit.Bold, v.name, lx, by, kit.BLACK)
-	tail := "   -  tap to cycle"
-	kit.DrawString(d.c, kit.Small, tail, x+w-16-kit.Measure(kit.Small, tail), by, kit.LGRAY)
+	kit.DrawString(d.c, kit.Bold, d.CurrentVariant().name, lx, by, kit.BLACK)
+
+	// flash button
+	kit.DrawCentered(d.c, kit.Bold, "FLASH", d.flashHit.Min.X, flashW, by, kit.BLACK)
 	return y + h + 14
 }
 
@@ -364,20 +382,37 @@ func (d *Doc) renderFilter(x, w int) {
 		st("with resonance Q of"), vr(d.q),
 		st(". Scrub either and watch all three curves reshape."),
 	})
+	// The full-width strip over the Fc/Q line(s): the only prose that changes
+	// during a scrub, so it's all we re-drive up here.
+	nbTop := min(d.fc.hit.Min.Y, d.q.hit.Min.Y) - 4
+	nbBot := max(d.fc.hit.Max.Y, d.q.hit.Max.Y) + 4
+	d.numberBand = image.Rect(x-10, nbTop, x+w+10, nbBot)
 	y += kit.Body.Line / 3
 
 	// Ghosting lab: tap-to-cycle picker for how a scrub pushes to the panel.
 	y = d.renderVariantControl(x, y, w)
 
-	// Block diagram of the filter: two integrators in a feedback loop.
+	// Block diagram of the filter: two integrators in a feedback loop. Static —
+	// drawn once, never re-driven during a scrub, so it never ghosts.
 	diag := image.Rect(x, y, x+w, y+250)
 	d.renderSVFDiagram(diag)
 
 	// The three magnitude responses — this is what redraws live as Q is scrubbed.
-	plot := image.Rect(x, diag.Max.Y+16, x+w, diag.Max.Y+16+500)
-	d.renderResponse(plot)
+	d.plotRect = image.Rect(x, diag.Max.Y+16, x+w, diag.Max.Y+16+500)
+	d.renderResponse(d.plotRect)
 
-	d.contentRect = image.Rect(x-20, top-10, x+w+20, plot.Max.Y+20)
+	d.contentRect = image.Rect(x-20, top-10, x+w+20, d.plotRect.Max.Y+20)
+}
+
+// ScrubRegions is the set of rectangles that actually change when a value is
+// scrubbed on the current page. The filter page returns just the number strip
+// and the plot, so the diagram and static prose aren't re-driven (and so can't
+// ghost); other pages redraw their whole content area.
+func (d *Doc) ScrubRegions() []image.Rectangle {
+	if d.page == 1 {
+		return []image.Rectangle{d.numberBand, d.plotRect}
+	}
+	return []image.Rectangle{d.contentRect}
 }
 
 // renderSVFDiagram draws the classic state-variable topology: the input is
@@ -824,11 +859,16 @@ func (d *Doc) varAt(x, y int) *Var {
 func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) {
 	d.penX, d.penY = t.X, t.Y
 
-	// Tap the ghosting-lab control (filter page) to cycle redraw variants.
-	if t.Kind == kit.TouchDown && !t.Button && d.page == 1 && image.Pt(t.X, t.Y).In(d.variantHit) {
-		d.variant = (d.variant + 1) % len(redrawVariants)
-		d.Render()
-		return d.variantHit, kit.RefreshFast, true
+	// Ghosting-lab controls (filter page), tapped with a plain touch (no button).
+	if t.Kind == kit.TouchDown && !t.Button && d.page == 1 {
+		if image.Pt(t.X, t.Y).In(d.flashHit) {
+			return d.bounds, modeFlash, true // manual full-screen de-ghost
+		}
+		if image.Pt(t.X, t.Y).In(d.variantHit) {
+			d.variant = (d.variant + 1) % len(redrawVariants)
+			d.Render()
+			return d.bounds, modeFlash, true // flash clean on every mode change
+		}
 	}
 
 	// Begin scrubbing: pen button pressed over a bold number.

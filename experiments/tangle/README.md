@@ -21,13 +21,23 @@ shared **`kit/`** infra layer.
 ## Ghosting lab
 
 E-ink redraws leave "ghosts" — faint remnants of the previous frame — and how
-badly depends on the waveform and update mode. The filter page has a
-**tap-to-cycle** control listing **10 named redraw variants** so they can be
-compared by scrubbing under each one:
+badly depends on the waveform and update mode. The filter page has a control
+bar: **tap the left side to cycle** through 10 named redraw variants, and tap
+**FLASH** (right side) to clear all ghosting with a full-screen GC16 pass.
+Cycling a variant also flashes clean, so each one starts from a fresh baseline.
 
-DU partial/full, A2 forced (pen) / A2 partial, GC16 partial / GC16 full flash,
-AUTO partial/full, a white-flash+GC16 de-ghost, and a DU-with-a-GC16-flash-every-8th
-hybrid. Tap the control, then scrub Q and watch the ghosting change.
+The variants (default first): `A2 pen + flash /10` (fast *and* self-clearing),
+`A2 pen` (super fast, ghosts), `DU partial`, `DU + flash /8`, `A2 partial`,
+`DU full`, `GC16 partial` (clean, no flash), `GC16 flash`, `AUTO partial`, and
+`white-flash + GC16` (de-ghost). The `flash /N` variants run the fast waveform
+but drop a localized GC16 flash every N updates to shed accumulated ghosting.
+
+**Why the prose and diagram don't ghost:** a scrub only re-drives the two things
+that actually change — the Fc/Q line and the plot. The static sentence, the
+block diagram, and the control bar are painted once and never touched again, so
+the fast (even A2-forced) waveform can't accumulate ghosting on them. Only the
+number strip and the curve can ghost, and those are what the `flash /N` cadence
+and the FLASH button clean up.
 
 ## The gesture
 
