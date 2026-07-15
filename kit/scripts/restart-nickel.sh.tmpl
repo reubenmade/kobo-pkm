@@ -1,0 +1,33 @@
+#!/bin/sh
+# Minimal Nickel restart, distilled from KOReader's platform/kobo/nickel.sh
+# (AGPL) — the battle-tested resurrection incantation.
+PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/lib:"
+export LD_LIBRARY_PATH="/usr/local/Kobo"
+export QT_GSTREAMER_PLAYBIN_AUDIOSINK=alsasink
+export QT_GSTREAMER_PLAYBIN_AUDIOSINK_DEVICE_PARAMETER=bluealsa:DEV=00:00:00:00:00:00
+cd /
+unset OLDPWD
+
+# Heal a stranded NickelMenu quarantine: NM renames libnm.so ->
+# libnm.so.failsafe on every nickel start and back ~20s later. A hard reboot /
+# nickel death inside that window strands the rename and NM silently never
+# loads again — undo it before nickel starts.
+NM=/usr/local/Kobo/imageformats/libnm.so
+if [ -e "$NM.failsafe" ] && [ ! -e "$NM" ]; then
+    mv "$NM.failsafe" "$NM" && echo "restart-nickel: healed stranded NickelMenu failsafe"
+fi
+
+# boot spinner; nickel kills it once it's up
+/etc/init.d/on-animator.sh &
+
+# recreate Nickel's hardware-status FIFO (udev writes into it)
+rm -f /tmp/nickel-hardware-status
+mkfifo /tmp/nickel-hardware-status
+
+sync
+
+/usr/local/Kobo/hindenburg &
+LIBC_FATAL_STDERR_=1 /usr/local/Kobo/nickel -platform kobo -skipFontLoad &
+udevadm trigger &
+
+exit 0

@@ -1,0 +1,28 @@
+# Tangle on Kobo — config. Copy to config.txt next to the binary.
+# Only device/calibration/sleep keys matter here; Tangle needs no network.
+
+# ---- device safety ----
+deadman_min = 60           # auto-exit after N idle minutes; 0 disables
+
+# ---- touch calibration (see kobo-pkm FIELD-NOTES.md) ----
+# Libra Colour: digitizer axes transposed + Y mirrored.
+#swap = auto
+miry = 1
+#mirx = 0
+#rot = -1
+#touchdev = /dev/input/event1
+
+# ---- pen ----
+# The elan tracks the pen while it hovers; contact starts at this raw pressure
+# (0..4095). The scrub gesture uses the pen SIDE BUTTON, so contact isn't even
+# required — but keep this sane so stray taps don't misfire.
+pen_touch_min = 30
+# One log line per digitizer frame (first few thousand) — turn on once to
+# confirm the side button reports as expected, then turn off.
+input_debug = 0
+
+# ---- sleep ----
+# "0" suspends like Nickel (page buttons, cover, power all wake); "1" is
+# KOReader's deeper suspend (only cover/power wake). "skip" leaves it alone.
+state_extended = 0
+#wake_gpio = 1             # arm cover wake — EXPERIMENTAL, broke waking once
