@@ -21,12 +21,6 @@ pen_touch_min = 30
 # confirm the side button reports as expected, then turn off.
 input_debug = 0
 
-# ---- redraw ----
-# Block each refresh until the panel has finished painting it, so rapid
-# scrubs can't queue updates that keep redrawing for seconds after you stop.
-# On by default; set to 0 only if a firmware misbehaves.
-#eink_wait = 1
-
 # ---- sleep ----
 # "0" suspends like Nickel (page buttons, cover, power all wake); "1" is
 # KOReader's deeper suspend (only cover/power wake). "skip" leaves it alone.

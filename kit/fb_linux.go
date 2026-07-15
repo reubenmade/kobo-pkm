@@ -41,13 +41,6 @@ const (
 	hwtconSendUpdate  = 0x4024462E
 	hwtconWfA2        = 6
 	hwtconFlagForceA2 = 0x10 // HWTCON_FLAG_FORCE_A2_OUTPUT — the pen path
-
-	// HWTCON_WAIT_FOR_UPDATE_COMPLETE — _IOWR('F', 0x2F, struct{marker,collision})
-	// (8 bytes). Blocks until the update with that marker has finished painting.
-	// Same request number as mxcfb's wait ioctl. Used to pace issuance to the
-	// panel so rapid redraws don't queue in the controller and drain for
-	// seconds after the input stops.
-	hwtconWaitUpdate = 0xC008462F
 )
 
 type FB struct {
@@ -62,7 +55,6 @@ type FB struct {
 	marker   uint32
 	useV1    bool
 	isHwtcon bool
-	noWait   bool // set if the wait-for-complete ioctl isn't supported
 }
 
 // OpenFB opens /dev/fb0 and prepares a logical portrait canvas.
@@ -95,7 +87,6 @@ func OpenFB(cfg Config) (*FB, error) {
 		bpp:      int(vinfo[6]),
 		stride:   int(finfo[11]), // line_length at byte offset 44
 		isHwtcon: fbID == "hwtcon",
-		noWait:   !cfg.EinkWait,
 	}
 	smemLen := int(finfo[5]) // smem_len at byte offset 20
 	f.mem, err = syscall.Mmap(fd, 0, smemLen, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
@@ -218,28 +209,6 @@ func (f *FB) Refresh(r image.Rectangle, mode RefreshMode) {
 	f.sendUpdate(nr, wf, um, flags)
 	if f.marker <= 5 {
 		log.Printf("eink: update #%d sent: region=%v wf=%d mode=%d", f.marker, nr, wf, um)
-	}
-	// Block until this update has actually painted. This is the flow control
-	// that stops rapid redraws (scrubbing) from queuing in the controller and
-	// draining for seconds after the input stops: we can't issue the next
-	// update until the panel has finished the last one, so issuance auto-paces
-	// to whatever the current waveform can sustain.
-	f.waitUpdate()
-}
-
-// waitUpdate blocks until the most recent update (f.marker) finishes painting.
-// Only meaningful on the hwtcon driver; self-disables if the kernel rejects the
-// ioctl, so an unexpected firmware just falls back to fire-and-forget.
-func (f *FB) waitUpdate() {
-	if !f.isHwtcon || f.noWait {
-		return
-	}
-	var m [2]uint32
-	m[0] = f.marker // update_marker
-	m[1] = 0        // collision_test
-	if err := ioctl(f.fd, hwtconWaitUpdate, unsafe.Pointer(&m[0])); err != nil {
-		log.Printf("eink: wait-for-complete failed (%v) — disabling, updates now fire-and-forget", err)
-		f.noWait = true
 	}
 }
 

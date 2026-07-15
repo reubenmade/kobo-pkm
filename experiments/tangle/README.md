@@ -37,10 +37,14 @@ recompute, and the page redraws. No contact needed — the elan streams the
 hovering pen, and the scrub rides the side button (BTN_STYLUS2), exactly the
 channel decoded in the riddle experiment.
 
-Scrubbing is **lazy**: each move only updates the value (cheap); the expensive
-re-render happens at most ~16 Hz and always once on release. So a fast drag
-jumps straight to the final value instead of grinding through every
-intermediate frame.
+Scrubbing is **single-in-flight and latest-wins**: a pen move only updates a
+target value; it never draws. Rendering happens once per main-loop pass, *after*
+the whole input backlog is drained, so it always redraws to wherever the pen is
+*now* — intermediate positions are skipped. And it never issues a redraw faster
+than the current waveform can actually paint (each variant carries its paint
+time), so updates can't pile up in the e-ink controller and keep redrawing after
+you stop. Net effect: slow moves look live; a fast flick snaps straight to the
+final value; releasing settles immediately.
 
 - **Physical page buttons** flip between the two pages.
 - **3 taps in a top corner** exits (works even if touch calibration is off).

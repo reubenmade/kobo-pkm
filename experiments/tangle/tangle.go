@@ -60,8 +60,10 @@ func (v *Var) setFromScrub(startVal float64, dxPixels int) bool {
 const (
 	margin    = 74
 	pageCount = 3
-	// e-ink discipline: never refresh faster than this while scrubbing.
-	refreshEvery = 60 * time.Millisecond
+	// Default scrub pacing (Prop 21 / Brighter pages, which redraw with DU) —
+	// roughly how long a DU update takes to paint, so we don't out-issue the
+	// panel. The filter page overrides this per ghosting variant.
+	refreshEvery = 220 * time.Millisecond
 )
 
 type Doc struct {
@@ -310,24 +312,27 @@ const modeVariant kit.RefreshMode = 100
 // A redraw variant is a named way to push a changed region to the panel, for
 // comparing how each one ghosts. composite 0 = the plain waveform in mode;
 // 1 = white-flash then GC16 (de-ghost); 2 = fast DU but a GC16 flash every 8th
-// update (a practical hybrid).
+// update (a practical hybrid). paintMs is roughly how long that update takes to
+// finish on the panel — we never issue a scrub update faster than this, so
+// updates can't pile up in the controller and drain for seconds after you stop.
 type redrawVariant struct {
 	name      string
 	mode      kit.RefreshMode
 	composite int
+	paintMs   int
 }
 
 var redrawVariants = []redrawVariant{
-	{"DU . partial  (default fast)", kit.RefreshFast, 0},
-	{"DU . full", kit.RefreshDUFull, 0},
-	{"A2 . forced  (pen mode)", kit.RefreshPen, 0},
-	{"A2 . partial", kit.RefreshA2, 0},
-	{"GC16 . partial  (clean, no flash)", kit.RefreshGC16Part, 0},
-	{"GC16 . full flash", kit.RefreshFull, 0},
-	{"AUTO . partial", kit.RefreshAuto, 0},
-	{"AUTO . full", kit.RefreshAutoFull, 0},
-	{"white-flash + GC16  (de-ghost)", kit.RefreshFull, 1},
-	{"DU + GC16 flash every 8th", kit.RefreshFast, 2},
+	{"DU . partial  (default fast)", kit.RefreshFast, 0, 230},
+	{"DU . full", kit.RefreshDUFull, 0, 260},
+	{"A2 . forced  (pen mode)", kit.RefreshPen, 0, 120},
+	{"A2 . partial", kit.RefreshA2, 0, 120},
+	{"GC16 . partial  (clean, no flash)", kit.RefreshGC16Part, 0, 450},
+	{"GC16 . full flash", kit.RefreshFull, 0, 600},
+	{"AUTO . partial", kit.RefreshAuto, 0, 300},
+	{"AUTO . full", kit.RefreshAutoFull, 0, 450},
+	{"white-flash + GC16  (de-ghost)", kit.RefreshFull, 1, 1100},
+	{"DU + GC16 flash every 8th", kit.RefreshFast, 2, 260},
 }
 
 func (d *Doc) CurrentVariant() redrawVariant { return redrawVariants[d.variant] }
@@ -888,14 +893,26 @@ func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) 
 	return empty()
 }
 
+// scrubInterval is the minimum gap between scrub updates — set to how long the
+// current redraw actually takes to paint, so we issue at (not above) the panel's
+// sustainable rate. That, plus rendering only the latest value, is the whole
+// fix for the runaway update cycle: at most one paint is ever "in flight", and
+// the next one always goes to wherever the pen is NOW.
+func (d *Doc) scrubInterval() time.Duration {
+	if d.page == 1 {
+		return time.Duration(d.CurrentVariant().paintMs) * time.Millisecond
+	}
+	return refreshEvery
+}
+
 // flushScrub renders the LATEST scrubbed value and returns its refresh — but
-// only if forced (scrub start/end) or the throttle window has elapsed.
+// only if forced (scrub start/end) or the pacing window has elapsed.
 // Intermediate values that fall between windows are never rendered.
 func (d *Doc) flushScrub(force, settle bool) (image.Rectangle, kit.RefreshMode, bool) {
 	if !d.needRender {
 		return empty()
 	}
-	if !force && time.Since(d.lastRefresh) < refreshEvery {
+	if !force && time.Since(d.lastRefresh) < d.scrubInterval() {
 		return empty()
 	}
 	d.Render()
