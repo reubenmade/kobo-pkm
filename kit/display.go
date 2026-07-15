@@ -9,15 +9,22 @@ package kit
 
 import "image"
 
-// RefreshMode maps to e-ink waveforms:
-//   - Fast = DU: binary, low latency (text/number scrubbing).
-//   - Auto = the controller picks (good default settling pass).
-//   - Full = GC16 with a full flash: clears ghosting (page turns).
-//   - Pen  = A2 + FORCE_A2_OUTPUT on the hwtcon driver: the instant-ink path.
+// RefreshMode maps to an e-ink waveform + update-mode (partial/full). The
+// waveform decides speed vs. ghosting; a "full" update flashes the whole region
+// to clear ghosting, a "partial" one doesn't.
+//
+//   - Fast     = DU,   partial — binary, low latency, ghosts build up.
+//   - Auto     = AUTO, partial — the controller picks per region.
+//   - Full     = GC16, full    — 16-grey flash, cleanest, slowest.
+//   - Pen      = A2 + FORCE_A2_OUTPUT, partial — the instant-ink path, heaviest ghost.
+//   - A2       = A2,   partial — 2-level fast, no force flag.
+//   - DUFull   = DU,   full    — binary but flashed full.
+//   - GC16Part = GC16, partial — 16-grey, no flash (clean but leaves faint edges).
+//   - AutoFull = AUTO, full.
 //
 // The one rule that matters: never issue a Refresh per input event. Draw into
-// the canvas freely, Refresh a bounded rect at most ~16 Hz, and do one Auto or
-// Full settling pass when a gesture ends.
+// the canvas freely, Refresh a bounded rect at most ~16 Hz, and do one settling
+// pass when a gesture ends.
 type RefreshMode int
 
 const (
@@ -25,6 +32,10 @@ const (
 	RefreshAuto
 	RefreshFull
 	RefreshPen
+	RefreshA2
+	RefreshDUFull
+	RefreshGC16Part
+	RefreshAutoFull
 )
 
 // Display is the render target — a framebuffer on device, PNG files in the sim.

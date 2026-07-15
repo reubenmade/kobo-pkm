@@ -182,17 +182,28 @@ func (f *FB) Refresh(r image.Rectangle, mode RefreshMode) {
 		return
 	}
 	wf, um, flags := uint32(wfModeAuto), uint32(updateModePartial), uint32(0)
+	a2 := uint32(wfModeDU) // A2 waveform code; on non-hwtcon fall back to DU
+	if f.isHwtcon {
+		a2 = hwtconWfA2
+	}
 	switch mode {
 	case RefreshFast:
 		wf = wfModeDU
 	case RefreshFull:
 		wf, um = wfModeGC16, updateModeFull
 	case RefreshPen:
+		wf = a2
 		if f.isHwtcon {
-			wf, flags = hwtconWfA2, hwtconFlagForceA2
-		} else {
-			wf = wfModeDU
+			flags = hwtconFlagForceA2
 		}
+	case RefreshA2:
+		wf = a2
+	case RefreshDUFull:
+		wf, um = wfModeDU, updateModeFull
+	case RefreshGC16Part:
+		wf = wfModeGC16
+	case RefreshAutoFull:
+		wf, um = wfModeAuto, updateModeFull
 	}
 	f.marker++
 	f.sendUpdate(nr, wf, um, flags)

@@ -11,23 +11,36 @@ shared **`kit/`** infra layer.
   the filter (two integrators in a feedback loop, with high-/band-/low-pass
   taps) plus the three response curves. Scrub the cutoff **Fc** or the resonance
   **Q** and all three curves reshape live — the peak grows with Q, the corner
-  slides with Fc.
+  slides with Fc. This page also carries the **ghosting lab** (below).
 - **Page 3 — Ten Brighter Ideas, No. 3** (efficient appliances). Scrub the
   efficiency gain and the adoption rate; energy saved (TWh), CO₂ (Mt), and money
   ($B) update as bars, and a pictograph shows how many nuclear reactors that
-  displaces.
+  displaces. **Hover the reactor row** to reveal a context popover (share of the
+  US fleet, running cost, and waste avoided), reactive to the scrubbed values.
 
-Whenever you scrub, a **popover** floats over the number showing its value and
-where it sits in its range.
+## Ghosting lab
+
+E-ink redraws leave "ghosts" — faint remnants of the previous frame — and how
+badly depends on the waveform and update mode. The filter page has a
+**tap-to-cycle** control listing **10 named redraw variants** so they can be
+compared by scrubbing under each one:
+
+DU partial/full, A2 forced (pen) / A2 partial, GC16 partial / GC16 full flash,
+AUTO partial/full, a white-flash+GC16 de-ghost, and a DU-with-a-GC16-flash-every-8th
+hybrid. Tap the control, then scrub Q and watch the ghosting change.
 
 ## The gesture
 
 Everything is done with the pen: **hover over a bold number, hold the pen's
 side button, and slide sideways.** The number scrubs, dependent numbers
-recompute, and the page redraws (throttled to ≤16 Hz with the fast DU waveform
-so it stays smooth on e-ink; one clean settling pass when you let go). No
-contact needed — the elan streams the hovering pen, and the scrub rides the
-side button (BTN_STYLUS2), exactly the channel decoded in the riddle experiment.
+recompute, and the page redraws. No contact needed — the elan streams the
+hovering pen, and the scrub rides the side button (BTN_STYLUS2), exactly the
+channel decoded in the riddle experiment.
+
+Scrubbing is **lazy**: each move only updates the value (cheap); the expensive
+re-render happens at most ~16 Hz and always once on release. So a fast drag
+jumps straight to the final value instead of grinding through every
+intermediate frame.
 
 - **Physical page buttons** flip between the two pages.
 - **3 taps in a top corner** exits (works even if touch calibration is off).

@@ -88,15 +88,26 @@ type Doc struct {
 	scrubStartX int
 	scrubStart  float64
 
-	// throttled refresh bookkeeping
-	pending     kit.BBox
+	// Ghosting lab (filter page): which redraw variant is selected, and the
+	// hit box of the tap-to-cycle control.
+	variant    int
+	variantHit image.Rectangle
+
+	// Reactor info popover (Brighter page): its hover target, and whether it's
+	// currently shown.
+	reactorHit image.Rectangle
+	info       bool
+
+	// Lazy render: scrub events update the value cheaply and mark needRender;
+	// the actual (expensive) Render happens only at the throttle window or on
+	// release — so a fast drag jumps straight to the final value.
+	needRender  bool
 	pendingMode kit.RefreshMode
-	havePending bool
 	lastRefresh time.Time
 
 	// filled each render, for dirty regions
 	contentRect image.Rectangle
-	popoverRect image.Rectangle
+	overlayRect image.Rectangle // info popover, folded into the dirty region
 }
 
 func NewDoc(c *image.RGBA, bounds image.Rectangle) *Doc {
@@ -234,12 +245,12 @@ func (d *Doc) Render() {
 		d.renderBrighter(x, w)
 	}
 
-	// The scrub popover floats over the page, so it's drawn last and folded
-	// into the content dirty region (its refresh rides the scrub's).
-	d.popoverRect = image.Rectangle{}
-	if d.scrub != nil {
-		d.popoverRect = d.drawPopover(d.scrub)
-		d.contentRect = unionRect(d.contentRect, d.popoverRect)
+	// The reactor info popover floats over the page; drawn last and folded into
+	// the content dirty region.
+	d.overlayRect = image.Rectangle{}
+	if d.info && d.page == 2 {
+		d.overlayRect = d.drawReactorInfo()
+		d.contentRect = unionRect(d.contentRect, d.overlayRect)
 	}
 	d.renderFooter()
 }
@@ -289,6 +300,56 @@ func (d *Doc) renderProp21(x, w int) {
 	d.contentRect = image.Rect(x-20, top-10, x+w+20, y+10)
 }
 
+// ---- ghosting lab ---------------------------------------------------------
+
+// modeVariant is a sentinel RefreshMode: when HandleTouch returns it, the
+// device handler applies the currently-selected ghosting variant (which may be
+// a plain waveform or a multi-step strategy) instead of a fixed refresh.
+const modeVariant kit.RefreshMode = 100
+
+// A redraw variant is a named way to push a changed region to the panel, for
+// comparing how each one ghosts. composite 0 = the plain waveform in mode;
+// 1 = white-flash then GC16 (de-ghost); 2 = fast DU but a GC16 flash every 8th
+// update (a practical hybrid).
+type redrawVariant struct {
+	name      string
+	mode      kit.RefreshMode
+	composite int
+}
+
+var redrawVariants = []redrawVariant{
+	{"DU . partial  (default fast)", kit.RefreshFast, 0},
+	{"DU . full", kit.RefreshDUFull, 0},
+	{"A2 . forced  (pen mode)", kit.RefreshPen, 0},
+	{"A2 . partial", kit.RefreshA2, 0},
+	{"GC16 . partial  (clean, no flash)", kit.RefreshGC16Part, 0},
+	{"GC16 . full flash", kit.RefreshFull, 0},
+	{"AUTO . partial", kit.RefreshAuto, 0},
+	{"AUTO . full", kit.RefreshAutoFull, 0},
+	{"white-flash + GC16  (de-ghost)", kit.RefreshFull, 1},
+	{"DU + GC16 flash every 8th", kit.RefreshFast, 2},
+}
+
+func (d *Doc) CurrentVariant() redrawVariant { return redrawVariants[d.variant] }
+
+// renderVariantControl draws the tap-to-cycle redraw picker; returns the y below it.
+func (d *Doc) renderVariantControl(x, y, w int) int {
+	const h = 56
+	r := image.Rect(x, y, x+w, y+h)
+	kit.Frame(d.c, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 2, kit.BLACK)
+	d.variantHit = r
+	v := d.CurrentVariant()
+	by := y + h/2 + kit.Small.Line/2 - 4
+	lead := fmt.Sprintf("ghosting lab   [%d/%d]   ", d.variant+1, len(redrawVariants))
+	lx := x + 16
+	kit.DrawString(d.c, kit.Small, lead, lx, by, kit.GRAY)
+	lx += kit.Measure(kit.Small, lead)
+	kit.DrawString(d.c, kit.Bold, v.name, lx, by, kit.BLACK)
+	tail := "   -  tap to cycle"
+	kit.DrawString(d.c, kit.Small, tail, x+w-16-kit.Measure(kit.Small, tail), by, kit.LGRAY)
+	return y + h + 14
+}
+
 func (d *Doc) renderFilter(x, w int) {
 	top := d.header(x, w, "A State-Variable Filter", "Ten Brighter Ideas' cousin  -  slide a bold number")
 
@@ -296,17 +357,19 @@ func (d *Doc) renderFilter(x, w int) {
 	y = d.flow(x, y, w, []tok{
 		st("One input, split three ways at once — low-pass, band-pass, high-pass — around a cutoff of"), vr(d.fc),
 		st("with resonance Q of"), vr(d.q),
-		st(". That resonance lifts the corner by"), bd(fmt.Sprintf("+%.1f dB", d.peakBoostDB())),
-		st(". Scrub either, and watch all three curves reshape."),
+		st(". Scrub either and watch all three curves reshape."),
 	})
 	y += kit.Body.Line / 3
 
+	// Ghosting lab: tap-to-cycle picker for how a scrub pushes to the panel.
+	y = d.renderVariantControl(x, y, w)
+
 	// Block diagram of the filter: two integrators in a feedback loop.
-	diag := image.Rect(x, y, x+w, y+270)
+	diag := image.Rect(x, y, x+w, y+250)
 	d.renderSVFDiagram(diag)
 
 	// The three magnitude responses — this is what redraws live as Q is scrubbed.
-	plot := image.Rect(x, diag.Max.Y+20, x+w, diag.Max.Y+20+520)
+	plot := image.Rect(x, diag.Max.Y+16, x+w, diag.Max.Y+16+500)
 	d.renderResponse(plot)
 
 	d.contentRect = image.Rect(x-20, top-10, x+w+20, plot.Max.Y+20)
@@ -505,14 +568,17 @@ func (d *Doc) renderBrighter(x, w int) {
 	d.statBar(barX, y, barW, rowH, "money", fmt.Sprintf("$%.0f billion", d.bMoneyB()), d.bMoneyB()/96)
 	y += rowH + kit.Body.Line/2
 
-	// Pictograph: reactors displaced, one cooling tower per reactor.
+	// Pictograph: reactors displaced, one cooling tower per reactor. The whole
+	// stat (phrase + grid) is a hover target for the context popover.
 	n := int(math.Round(d.bReactors()))
+	phraseY := y
 	y = d.flow(x, y, w, []tok{
 		st("That's like shutting down"), bd(fmt.Sprintf("%d", n)),
-		st("nuclear reactors:"),
+		st("nuclear reactors  (hover for context):"),
 	})
 	y += 20
 	y = d.reactorGrid(x, y, w, n)
+	d.reactorHit = image.Rect(x-10, phraseY-6, x+w+10, y+6)
 
 	d.contentRect = image.Rect(x-20, top-10, x+w+20, y+20)
 }
@@ -580,40 +646,48 @@ func coolingTower(c *image.RGBA, x, y, w, h int) {
 	kit.Stamp(c, x+w/2+9, topY-16, 5, kit.LGRAY)
 }
 
-// drawPopover floats a value readout over the number being scrubbed: the value,
-// large, above a min..max track showing where it sits. Returns its rect (for
-// the dirty region).
-func (d *Doc) drawPopover(v *Var) image.Rectangle {
-	const pw, ph, gap = 300, 150, 18
-	cx := (v.hit.Min.X + v.hit.Max.X) / 2
-	px0 := kit.Clamp(cx-pw/2, margin, d.bounds.Dx()-margin-pw)
-	// above the number, unless that would collide with the header
-	py0 := v.hit.Min.Y - gap - ph
-	if py0 < 150 {
-		py0 = v.hit.Max.Y + gap
+// Per-reactor figures, from Bret Victor's Ten Brighter Ideas (1.5 reactors =
+// $494M/yr and 32.7 t/yr of waste, out of 104 U.S. reactors).
+const (
+	usReactors     = 104.0
+	reactorCostB   = 0.329 // $ billion / reactor / year to run
+	reactorWasteT  = 21.8  // tonnes of radioactive waste / reactor / year
+)
+
+// drawReactorInfo reveals a context panel below the reactor pictograph — what
+// those displaced reactors mean in share, cost, and waste. Reactive: it tracks
+// the scrubbed values. Returns its rect (for the dirty region).
+func (d *Doc) drawReactorInfo() image.Rectangle {
+	n := math.Round(d.bReactors())
+	x := margin
+	w := d.bounds.Dx() - 2*margin
+	py := d.reactorHit.Max.Y + 16
+	ph := kit.H2.Line + 3*kit.Body.Line + 40
+	if py+ph > d.bounds.Dy()-110 { // keep clear of the footer
+		py = d.bounds.Dy() - 110 - ph
 	}
-	rect := image.Rect(px0, py0, px0+pw, py0+ph)
+	r := image.Rect(x, py, x+w, py+ph)
 
-	kit.FillRect(d.c, rect, kit.WHITE)
-	kit.Frame(d.c, rect.Min.X, rect.Min.Y, rect.Dx(), rect.Dy(), 3, kit.BLACK)
+	kit.FillRect(d.c, r, kit.WHITE)
+	kit.Frame(d.c, r.Min.X, r.Min.Y, r.Dx(), r.Dy(), 3, kit.BLACK)
 
-	kit.DrawCentered(d.c, kit.H1, v.text(), rect.Min.X, pw, rect.Min.Y+18+kit.H1.Asc, kit.BLACK)
-
-	// min..max track
-	ty := rect.Max.Y - 44
-	t0, t1 := rect.Min.X+28, rect.Max.X-28
-	kit.FillRect(d.c, image.Rect(t0, ty, t1, ty+3), kit.LGRAY)
-	frac := 0.0
-	if v.Max > v.Min {
-		frac = (v.Val - v.Min) / (v.Max - v.Min)
+	ix, iy := x+24, py+18
+	kit.DrawStringTop(d.c, kit.H2, "Those reactors, in context", ix, iy, kit.BLACK)
+	iy += kit.H2.Line + 8
+	pct := 0.0
+	if n > 0 {
+		pct = n / usReactors * 100
 	}
-	frac = math.Max(0, math.Min(1, frac))
-	knob := t0 + int(float64(t1-t0)*frac)
-	kit.Stamp(d.c, knob, ty+1, 9, kit.BLACK)
-	kit.DrawStringTop(d.c, kit.Small, v.Format(v.Min), t0-8, ty+12, kit.GRAY)
-	maxS := v.Format(v.Max)
-	kit.DrawStringTop(d.c, kit.Small, maxS, t1-kit.Measure(kit.Small, maxS)+8, ty+12, kit.GRAY)
-	return rect
+	lines := []string{
+		fmt.Sprintf("= %.1f%% of the 104 reactors in the U.S. fleet", pct),
+		fmt.Sprintf("~ $%.1f billion a year no longer spent running them", n*reactorCostB),
+		fmt.Sprintf("~ %.0f tonnes a year of radioactive waste never made", n*reactorWasteT),
+	}
+	for _, s := range lines {
+		kit.DrawStringTop(d.c, kit.Body, s, ix, iy, kit.GRAY)
+		iy += kit.Body.Line
+	}
+	return r
 }
 
 func unionRect(a, b image.Rectangle) image.Rectangle {
@@ -734,51 +808,64 @@ func (d *Doc) varAt(x, y int) *Var {
 	return nil
 }
 
-// HandleTouch feeds one event through the interaction model. It re-renders the
-// canvas as needed and returns the region to refresh, the waveform, and whether
-// anything should be pushed to the panel now (throttled for smoothness).
+// HandleTouch feeds one event through the interaction model and returns the
+// region to refresh, the waveform, and whether to push to the panel now.
+//
+// Scrubbing is LAZY: each move only updates the value (cheap) and marks
+// needRender; the expensive Render happens at the throttle window or on
+// release, so a fast drag jumps straight to the final value instead of
+// grinding through every intermediate. modeVariant means "apply the selected
+// ghosting variant" (filter page only).
 func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) {
 	d.penX, d.penY = t.X, t.Y
 
-	// Begin scrubbing: pen button pressed while over a bold number.
+	// Tap the ghosting-lab control (filter page) to cycle redraw variants.
+	if t.Kind == kit.TouchDown && !t.Button && d.page == 1 && image.Pt(t.X, t.Y).In(d.variantHit) {
+		d.variant = (d.variant + 1) % len(redrawVariants)
+		d.Render()
+		return d.variantHit, kit.RefreshFast, true
+	}
+
+	// Begin scrubbing: pen button pressed over a bold number.
 	if t.Button && d.scrub == nil {
 		if v := d.varAt(t.X, t.Y); v != nil {
 			d.scrub = v
 			d.scrubStartX = t.X
 			d.scrubStart = v.Val
 			d.hover = v
-			d.Render()
-			return d.flush(true, kit.RefreshFast)
+			d.needRender = true
+			return d.flushScrub(true, false)
 		}
 	}
 
-	// Continue scrubbing.
+	// Continue scrubbing: update value only, render lazily at the throttle.
 	if d.scrub != nil && t.Button {
 		if d.scrub.setFromScrub(d.scrubStart, t.X-d.scrubStartX) {
-			d.Render()
-			d.mark(d.contentRect, kit.RefreshFast)
-			return d.flush(false, kit.RefreshFast) // throttled
+			d.needRender = true
 		}
-		return empty()
+		return d.flushScrub(false, false)
 	}
 
-	// End scrubbing: button released — one clean settling pass. Refresh must
-	// cover where the popover was, so union it in before it's cleared.
+	// End scrubbing: jump to the final value and render it once.
 	if d.scrub != nil && !t.Button {
-		prevPop := d.popoverRect
 		d.scrub = nil
 		d.hover = d.varAt(t.X, t.Y)
-		d.Render()
-		reg := unionRect(d.contentRect, prevPop)
-		d.pending = kit.EmptyBBox()
-		d.havePending = false
-		d.lastRefresh = time.Now()
-		return reg, kit.RefreshAuto, true
+		d.needRender = true
+		return d.flushScrub(true, true)
+	}
+
+	// Reactor info popover: hovering the reactor stat toggles it (Brighter).
+	if d.page == 2 {
+		if over := image.Pt(t.X, t.Y).In(d.reactorHit); over != d.info {
+			d.info = over
+			prevOverlay := d.overlayRect
+			d.Render()
+			return unionRect(unionRect(d.reactorHit, prevOverlay), d.overlayRect), kit.RefreshFast, true
+		}
 	}
 
 	// Plain hover: move the underline to whatever number the pen is over.
-	nh := d.varAt(t.X, t.Y)
-	if nh != d.hover {
+	if nh := d.varAt(t.X, t.Y); nh != d.hover {
 		prev := d.hover
 		d.hover = nh
 		d.Render()
@@ -790,45 +877,47 @@ func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) 
 			dirty.AddRect(nh.hit)
 		}
 		if !dirty.IsEmpty() {
-			d.mark(dirty.Rect(d.bounds), kit.RefreshFast)
-			return d.flush(true, kit.RefreshFast)
+			return dirty.Rect(d.bounds), kit.RefreshFast, true
 		}
 	}
 	return empty()
 }
 
-// Tick flushes any throttled change once the refresh window has elapsed, so a
-// scrub that stops mid-slide still settles without another event.
-func (d *Doc) Tick() (image.Rectangle, kit.RefreshMode, bool) {
-	if d.havePending {
-		return d.flush(false, d.pendingMode)
-	}
-	return empty()
-}
-
-func (d *Doc) mark(r image.Rectangle, mode kit.RefreshMode) {
-	d.pending.AddRect(r)
-	d.pendingMode = mode
-	d.havePending = true
-}
-
-// flush returns a refresh if forced, or if the throttle window has elapsed.
-func (d *Doc) flush(force bool, mode kit.RefreshMode) (image.Rectangle, kit.RefreshMode, bool) {
-	if !d.havePending {
-		if force {
-			// nothing accumulated but caller wants a paint (e.g. hover)
-			return d.contentRect, mode, true
-		}
+// flushScrub renders the LATEST scrubbed value and returns its refresh — but
+// only if forced (scrub start/end) or the throttle window has elapsed.
+// Intermediate values that fall between windows are never rendered.
+func (d *Doc) flushScrub(force, settle bool) (image.Rectangle, kit.RefreshMode, bool) {
+	if !d.needRender {
 		return empty()
 	}
 	if !force && time.Since(d.lastRefresh) < refreshEvery {
 		return empty()
 	}
-	r := d.pending.Rect(d.bounds)
-	d.pending = kit.EmptyBBox()
-	d.havePending = false
+	d.Render()
+	d.needRender = false
 	d.lastRefresh = time.Now()
-	return r, mode, true
+	d.pendingMode = d.scrubMode(settle)
+	return d.contentRect, d.pendingMode, true
+}
+
+// scrubMode picks the waveform for a scrub refresh. The filter page defers to
+// the ghosting lab (so you can see how each variant ghosts, including on the
+// settling pass); other pages use fast DU while dragging and a clean AUTO
+// settle on release.
+func (d *Doc) scrubMode(settle bool) kit.RefreshMode {
+	if d.page == 1 {
+		return modeVariant
+	}
+	if settle {
+		return kit.RefreshAuto
+	}
+	return kit.RefreshFast
+}
+
+// Tick renders a throttled scrub change once the window has elapsed, so a drag
+// that stops mid-slide (button still held) still settles without a new event.
+func (d *Doc) Tick() (image.Rectangle, kit.RefreshMode, bool) {
+	return d.flushScrub(false, false)
 }
 
 func empty() (image.Rectangle, kit.RefreshMode, bool) {
