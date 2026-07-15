@@ -60,6 +60,7 @@ func (v *Var) setFromScrub(startVal float64, dxPixels int) bool {
 const (
 	margin    = 74
 	pageCount = 3
+	labBarH   = 56 // height of the ghosting-lab bar in the footer
 	// Default scrub pacing (Prop 21 / Brighter pages, which redraw with DU) —
 	// roughly how long a DU update takes to paint, so we don't out-issue the
 	// panel. The filter page overrides this per ghosting variant.
@@ -100,10 +101,11 @@ type Doc struct {
 	numberBand image.Rectangle // full-width strip over the Fc/Q line(s)
 	plotRect   image.Rectangle
 
-	// Reactor info popover (Brighter page): its hover target, and whether it's
-	// currently shown.
-	reactorHit image.Rectangle
-	info       bool
+	// Reactor info popover (Brighter page): its hover target, whether it's
+	// shown, and its pre-computed lines (so a hover is a pure draw — no math).
+	reactorHit   image.Rectangle
+	info         bool
+	reactorLines []string
 
 	// Lazy render: scrub events update the value cheaply and mark needRender;
 	// the actual (expensive) Render happens only at the throttle window or on
@@ -138,7 +140,7 @@ func (d *Doc) Page() int { return d.page }
 
 func (d *Doc) SetPage(p int) {
 	d.page = ((p % pageCount) + pageCount) % pageCount
-	d.scrub, d.hover = nil, nil
+	d.scrub, d.hover, d.info = nil, nil, false
 	d.Render()
 }
 
@@ -349,10 +351,10 @@ var redrawVariants = []redrawVariant{
 func (d *Doc) CurrentVariant() redrawVariant { return redrawVariants[d.variant] }
 
 // renderVariantControl draws the tap-to-cycle redraw picker plus a flash
-// button; returns the y below it. The left area cycles the variant (and flashes
-// clean); the right button flashes on demand.
-func (d *Doc) renderVariantControl(x, y, w int) int {
-	const h = 56
+// button (it lives in the footer on the filter page). The left area cycles the
+// variant (and flashes clean); the right button flashes on demand.
+func (d *Doc) renderVariantControl(x, y, w int) {
+	const h = labBarH
 	const flashW = 168
 	kit.Frame(d.c, x, y, w, h, 2, kit.BLACK)
 
@@ -370,7 +372,6 @@ func (d *Doc) renderVariantControl(x, y, w int) int {
 
 	// flash button
 	kit.DrawCentered(d.c, kit.Bold, "FLASH", d.flashHit.Min.X, flashW, by, kit.BLACK)
-	return y + h + 14
 }
 
 func (d *Doc) renderFilter(x, w int) {
@@ -387,18 +388,16 @@ func (d *Doc) renderFilter(x, w int) {
 	nbTop := min(d.fc.hit.Min.Y, d.q.hit.Min.Y) - 4
 	nbBot := max(d.fc.hit.Max.Y, d.q.hit.Max.Y) + 4
 	d.numberBand = image.Rect(x-10, nbTop, x+w+10, nbBot)
-	y += kit.Body.Line / 3
-
-	// Ghosting lab: tap-to-cycle picker for how a scrub pushes to the panel.
-	y = d.renderVariantControl(x, y, w)
+	y += kit.Body.Line / 2
 
 	// Block diagram of the filter: two integrators in a feedback loop. Static —
 	// drawn once, never re-driven during a scrub, so it never ghosts.
 	diag := image.Rect(x, y, x+w, y+250)
 	d.renderSVFDiagram(diag)
 
-	// The three magnitude responses — this is what redraws live as Q is scrubbed.
-	d.plotRect = image.Rect(x, diag.Max.Y+16, x+w, diag.Max.Y+16+500)
+	// The three magnitude responses fill the space down to the footer (which
+	// carries the ghosting lab on this page). This is what redraws live.
+	d.plotRect = image.Rect(x, diag.Max.Y+20, x+w, d.bounds.Dy()-labBarH-40)
 	d.renderResponse(d.plotRect)
 
 	d.contentRect = image.Rect(x-20, top-10, x+w+20, d.plotRect.Max.Y+20)
@@ -620,6 +619,18 @@ func (d *Doc) renderBrighter(x, w int) {
 	y = d.reactorGrid(x, y, w, n)
 	d.reactorHit = image.Rect(x-10, phraseY-6, x+w+10, y+6)
 
+	// Pre-compute the hover-popover lines here (they depend only on the scrubbed
+	// values), so revealing the box on hover is a pure draw with no math.
+	pct := 0.0
+	if n > 0 {
+		pct = float64(n) / usReactors * 100
+	}
+	d.reactorLines = []string{
+		fmt.Sprintf("= %.1f%% of the 104 reactors in the U.S. fleet", pct),
+		fmt.Sprintf("~ $%.1f billion a year no longer spent running them", float64(n)*reactorCostB),
+		fmt.Sprintf("~ %.0f tonnes a year of radioactive waste never made", float64(n)*reactorWasteT),
+	}
+
 	d.contentRect = image.Rect(x-20, top-10, x+w+20, y+20)
 }
 
@@ -695,10 +706,9 @@ const (
 )
 
 // drawReactorInfo reveals a context panel below the reactor pictograph — what
-// those displaced reactors mean in share, cost, and waste. Reactive: it tracks
-// the scrubbed values. Returns its rect (for the dirty region).
+// those displaced reactors mean in share, cost, and waste. Draws the
+// pre-computed lines (no math on the hover path). Returns its rect.
 func (d *Doc) drawReactorInfo() image.Rectangle {
-	n := math.Round(d.bReactors())
 	x := margin
 	w := d.bounds.Dx() - 2*margin
 	py := d.reactorHit.Max.Y + 16
@@ -714,16 +724,7 @@ func (d *Doc) drawReactorInfo() image.Rectangle {
 	ix, iy := x+24, py+18
 	kit.DrawStringTop(d.c, kit.H2, "Those reactors, in context", ix, iy, kit.BLACK)
 	iy += kit.H2.Line + 8
-	pct := 0.0
-	if n > 0 {
-		pct = n / usReactors * 100
-	}
-	lines := []string{
-		fmt.Sprintf("= %.1f%% of the 104 reactors in the U.S. fleet", pct),
-		fmt.Sprintf("~ $%.1f billion a year no longer spent running them", n*reactorCostB),
-		fmt.Sprintf("~ %.0f tonnes a year of radioactive waste never made", n*reactorWasteT),
-	}
-	for _, s := range lines {
+	for _, s := range d.reactorLines {
 		kit.DrawStringTop(d.c, kit.Body, s, ix, iy, kit.GRAY)
 		iy += kit.Body.Line
 	}
@@ -742,6 +743,11 @@ func unionRect(a, b image.Rectangle) image.Rectangle {
 
 func (d *Doc) renderFooter() {
 	w := d.bounds.Dx()
+	// The filter page puts the ghosting lab in the footer.
+	if d.page == 1 {
+		d.renderVariantControl(margin, d.bounds.Dy()-labBarH-22, w-2*margin)
+		return
+	}
 	y := d.bounds.Dy() - 70
 	kit.FillRect(d.c, image.Rect(margin, y-24, w-margin, y-22), kit.LGRAY)
 	kit.DrawStringTop(d.c, kit.Small, "page buttons flip  -  3 taps top-corner exits", margin, y, kit.LGRAY)
@@ -904,13 +910,16 @@ func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) 
 		return d.flushScrub(true, true)
 	}
 
-	// Reactor info popover: hovering the reactor stat toggles it (Brighter).
+	// Reactor info popover: a true hover — visible while the pen is over the
+	// reactors, hidden otherwise. Only the box area changes on screen (it sits
+	// in empty space below the pictograph), so refresh just that, crisply — not
+	// the whole pictograph, which is what made it crawl in before.
 	if d.page == 2 {
 		if over := image.Pt(t.X, t.Y).In(d.reactorHit); over != d.info {
 			d.info = over
 			prevOverlay := d.overlayRect
 			d.Render()
-			return unionRect(unionRect(d.reactorHit, prevOverlay), d.overlayRect), kit.RefreshFast, true
+			return unionRect(prevOverlay, d.overlayRect), kit.RefreshAuto, true
 		}
 	}
 

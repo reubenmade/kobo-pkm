@@ -21,9 +21,9 @@ shared **`kit/`** infra layer.
 ## Ghosting lab
 
 E-ink redraws leave "ghosts" — faint remnants of the previous frame — and how
-badly depends on the waveform and update mode. The filter page has a control
-bar: **tap the left side to cycle** through 10 named redraw variants, and tap
-**FLASH** (right side) to clear all ghosting with a full-screen GC16 pass.
+badly depends on the waveform and update mode. The filter page's **footer** is a
+control bar: **tap the left side to cycle** through 10 named redraw variants, and
+tap **FLASH** (right side) to clear all ghosting with a full-screen GC16 pass.
 Cycling a variant also flashes clean, so each one starts from a fresh baseline.
 
 The variants (default first): `A2 pen + flash /10` (fast *and* self-clearing),
