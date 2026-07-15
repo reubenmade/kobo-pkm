@@ -7,9 +7,18 @@ shared **`kit/`** infra layer.
 - **Page 1 — Proposition 21.** A civic what-if: scrub the surcharge or the
   number of vehicles and the revenue, the leftover parks budget, and projected
   attendance all update in the sentence.
-- **Page 2 — A state-variable filter** ("the electrical"). Scrub the cutoff
-  **Fc** or the resonance **Q** and the frequency-response curve below redraws
-  live — the resonant peak grows with Q, the corner slides with Fc.
+- **Page 2 — A state-variable filter** ("the electrical"). A block diagram of
+  the filter (two integrators in a feedback loop, with high-/band-/low-pass
+  taps) plus the three response curves. Scrub the cutoff **Fc** or the resonance
+  **Q** and all three curves reshape live — the peak grows with Q, the corner
+  slides with Fc.
+- **Page 3 — Ten Brighter Ideas, No. 3** (efficient appliances). Scrub the
+  efficiency gain and the adoption rate; energy saved (TWh), CO₂ (Mt), and money
+  ($B) update as bars, and a pictograph shows how many nuclear reactors that
+  displaces.
+
+Whenever you scrub, a **popover** floats over the number showing its value and
+where it sits in its range.
 
 ## The gesture
 

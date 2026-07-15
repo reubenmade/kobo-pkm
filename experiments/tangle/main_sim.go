@@ -41,11 +41,16 @@ func main() {
 	scrub(d, d.surcharge, 4) // budget goes negative — leftover shows a shortfall
 	disp.Snap("prop21-surcharge-low")
 
+	// popover mid-scrub (button still held)
+	scrubHold(d, d.surcharge, 26)
+	disp.Snap("prop21-popover")
+	release(d, d.surcharge)
+
 	// -- Page 1: the state-variable filter ------------------------------
 	d.SetPage(1)
 	disp.Snap("filter-default")
 
-	scrub(d, d.q, 8) // tall resonant peak
+	scrub(d, d.q, 8) // tall resonant peak on low/high-pass
 	disp.Snap("filter-q-8")
 
 	scrub(d, d.fc, 4000) // corner slides right
@@ -54,7 +59,39 @@ func main() {
 	scrub(d, d.q, 0.7) // flat (Butterworth), no peak
 	disp.Snap("filter-q-flat")
 
+	// -- Page 2: Ten Brighter Ideas No. 3 -------------------------------
+	d.SetPage(2)
+	disp.Snap("brighter-default")
+
+	scrubHold(d, d.reduction, 35)
+	disp.Snap("brighter-popover") // popover visible mid-scrub
+	release(d, d.reduction)
+	disp.Snap("brighter-reduction-35")
+
+	scrub(d, d.adoption, 95)
+	disp.Snap("brighter-adoption-95")
+
+	scrub(d, d.reduction, 5) // few reactors
+	disp.Snap("brighter-low")
+
 	log.Printf("sim: done — %d snapshots in %s", disp.Count(), out)
+}
+
+// scrubHold presses the pen button over v and slides toward target WITHOUT
+// releasing, so the popover stays on screen for a snapshot.
+func scrubHold(d *Doc, v *Var, target float64) {
+	cx, cy := center(v)
+	d.HandleTouch(kit.Touch{Kind: kit.TouchHover, X: cx, Y: cy, Button: true})
+	dx := int((target - v.Val) / v.Step * v.PxPerStep)
+	const n = 24
+	for i := 1; i <= n; i++ {
+		d.HandleTouch(kit.Touch{Kind: kit.TouchHover, X: cx + dx*i/n, Y: cy, Button: true})
+	}
+}
+
+func release(d *Doc, v *Var) {
+	cx, cy := center(v)
+	d.HandleTouch(kit.Touch{Kind: kit.TouchHover, X: cx, Y: cy, Button: false})
 }
 
 // hover moves the pen over a var (button up) so its underline shows.
