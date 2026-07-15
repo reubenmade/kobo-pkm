@@ -27,6 +27,11 @@ type Config struct {
 	// raw material for decoding hover / eraser / button behaviour.
 	InputDebug bool
 
+	// EinkWait blocks each refresh until the panel finishes painting it, pacing
+	// rapid redraws so they don't queue in the controller. On by default; set
+	// "eink_wait = 0" to fall back to fire-and-forget if a firmware misbehaves.
+	EinkWait bool
+
 	// Sleep.
 	WakeGPIO bool // arm gpio-keys as a suspend wake source (cover wake) — EXPERIMENTAL
 	// StateExtended is written to /sys/power/state-extended (gSleep_Mode_Suspend):
@@ -48,6 +53,7 @@ func DefaultConfig() Config {
 		PenTouchMin:   30,
 		StateExtended: "0",
 		DeadmanMin:    60,
+		EinkWait:      true,
 		Extra:         map[string]string{},
 	}
 }
@@ -102,6 +108,8 @@ func (c *Config) Set(k, v string) {
 		}
 	case "input_debug":
 		c.InputDebug = truthy(v)
+	case "eink_wait":
+		c.EinkWait = truthy(v)
 	case "wake_gpio":
 		c.WakeGPIO = truthy(v)
 	case "state_extended":

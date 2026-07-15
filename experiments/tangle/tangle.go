@@ -838,12 +838,17 @@ func (d *Doc) HandleTouch(t kit.Touch) (image.Rectangle, kit.RefreshMode, bool) 
 		}
 	}
 
-	// Continue scrubbing: update value only, render lazily at the throttle.
+	// Continue scrubbing: ONLY update the value here — never render. Rendering
+	// is deferred to Tick, which runs once per main-loop iteration AFTER the
+	// whole input backlog has been drained. So a fast drag that queues 50 move
+	// events collapses to a single render of the latest value, instead of
+	// replaying every intermediate step (that replay is what kept the panel
+	// updating for seconds after you let go).
 	if d.scrub != nil && t.Button {
 		if d.scrub.setFromScrub(d.scrubStart, t.X-d.scrubStartX) {
 			d.needRender = true
 		}
-		return d.flushScrub(false, false)
+		return empty()
 	}
 
 	// End scrubbing: jump to the final value and render it once.
